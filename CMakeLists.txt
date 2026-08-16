@@ -29,7 +29,23 @@ if(UNIX AND NOT APPLE)
   pkg_check_modules(EGL REQUIRED egl)
   pkg_check_modules(GLES REQUIRED glesv2)
 else()
-  find_package(SDL2 REQUIRED)
+  # Homebrew ships SDL2 with pkg-config but not always a CMake config package, and
+  # vcpkg ships the config but no pkg-config. Try the config first and fall back,
+  # rather than requiring one and failing on the platform that has the other.
+  find_package(SDL2 CONFIG QUIET)
+  if(NOT SDL2_FOUND)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+      pkg_check_modules(SDL2 sdl2)
+    endif()
+  endif()
+  if(NOT SDL2_FOUND)
+    message(FATAL_ERROR
+      "SDL2 not found.\n"
+      "  macOS:   brew install sdl2\n"
+      "  Windows: vcpkg install sdl2 (and pass the vcpkg toolchain file)")
+  endif()
+
   if(NOT EXISTS ${ANGLE_DIR})
     message(FATAL_ERROR
       "ANGLE not found at ${ANGLE_DIR}.\n"
@@ -45,7 +61,10 @@ else()
     set(EGL_LIBRARIES ${ANGLE_DIR}/lib/libEGL.lib)
     set(GLES_LIBRARIES ${ANGLE_DIR}/lib/libGLESv2.lib)
   endif()
-  set(SDL2_LIBRARIES SDL2::SDL2)
+  # The config package exposes an imported target; pkg-config exposes raw flags.
+  if(TARGET SDL2::SDL2)
+    set(SDL2_LIBRARIES SDL2::SDL2)
+  endif()
 endif()
 
 set(QUICKJS_DIR ${CMAKE_SOURCE_DIR}/deps/quickjs)
@@ -80,10 +99,27 @@ target_compile_options(quickjs PRIVATE -Wno-unused-variable -Wno-unused-but-set-
 # egl_context.cpp contains ZERO Napi and compiles verbatim.
 # gl_bindings.cpp compiles verbatim too, against src/napi_shim.h via src/napi.h,
 # which takes include priority over node-addon-api's header.
-add_library(nativegles STATIC
+set(NATIVE_GLES_SOURCES
   ${NATIVE_GLES_DIR}/egl_context.cpp
   ${NATIVE_GLES_DIR}/gl_bindings.cpp
 )
+if(APPLE)
+  # egl_context.cpp calls gles_mac_* to build the CAMetalLayer ANGLE presents
+  # into. Those live in an ObjC++ file that only makes sense on macOS, which is
+  # why it is added per-platform rather than unconditionally.
+  list(APPEND NATIVE_GLES_SOURCES ${NATIVE_GLES_DIR}/mac_native_window.mm)
+endif()
+
+add_library(nativegles STATIC ${NATIVE_GLES_SOURCES})
+
+if(APPLE)
+  # The ObjC++ file needs ARC off (native-gles manages its own retain/release)
+  # and the frameworks ANGLE's Metal backend links against.
+  set_source_files_properties(${NATIVE_GLES_DIR}/mac_native_window.mm
+    PROPERTIES COMPILE_FLAGS "-fno-objc-arc")
+  target_link_libraries(nativegles PUBLIC
+    "-framework Cocoa" "-framework QuartzCore" "-framework Foundation")
+endif()
 target_include_directories(nativegles PUBLIC
   ${CMAKE_SOURCE_DIR}/src        # our napi.h must precede any real one
   ${QUICKJS_DIR}

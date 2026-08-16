@@ -70,7 +70,16 @@ jobs:
       - name: deps (windows)
         if: matrix.platform == 'win32'
         working-directory: .
-        run: vcpkg install sdl2:x64-windows
+        shell: pwsh
+        run: |
+          # Match the runner's own architecture: an arm64 runner cannot use x64
+          # SDL2 binaries.
+          $triplet = if ("${{ matrix.name }}" -eq "windows-arm64") { "arm64-windows" } else { "x64-windows" }
+          vcpkg install "sdl2:$triplet"
+          # CMake finds vcpkg packages ONLY through its toolchain file; installing
+          # alone is not enough and fails at find_package.
+          echo "CMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" >> $env:GITHUB_ENV
+          echo "VCPKG_TARGET_TRIPLET=$triplet" >> $env:GITHUB_ENV
 
       # macOS and Windows have no system GLES. native-gles ships ANGLE for exactly
       # this, so use ITS downloader rather than a second, divergent copy here.
@@ -85,8 +94,13 @@ jobs:
         run: node scripts/fetch-deps.mjs
 
       - name: build
+        shell: bash
         run: |
-          cmake -S . -B build-cmake -DCMAKE_BUILD_TYPE=Release
+          EXTRA=""
+          if [ -n "${CMAKE_TOOLCHAIN_FILE:-}" ]; then
+            EXTRA="-DCMAKE_TOOLCHAIN_FILE=$CMAKE_TOOLCHAIN_FILE -DVCPKG_TARGET_TRIPLET=$VCPKG_TARGET_TRIPLET"
+          fi
+          cmake -S . -B build-cmake -DCMAKE_BUILD_TYPE=Release $EXTRA
           cmake --build build-cmake --config Release -j
 
       # A build that produces a binary which cannot boot is not a passing build.

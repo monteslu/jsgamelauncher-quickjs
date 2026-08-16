@@ -277,10 +277,26 @@ check('worker: runs on a real thread (parallel, not cooperative)',
 /* ------------------------------------------------------------------ audio ---- */
 
 check('audio: latency is frame-scale, not the 1-2s of the queue-and-poll model',
-  `const A = globalThis.__jsglq_audio; A.init();
-   const s = A.stats();
-   console.log('R:' + s.latencyMs.toFixed(1) + ':' + s.underruns);`,
+  `const A = globalThis.__jsglq_audio;
+   try {
+     A.init();
+     const s = A.stats();
+     console.log('R:' + s.latencyMs.toFixed(1) + ':' + s.underruns);
+   } catch (e) {
+     // A headless CI runner has no sound card, so opening a device legitimately
+     // fails. That must be reported as NO-DEVICE rather than silently passing:
+     // a test that quietly succeeds when it could not run is worse than one that
+     // fails, because it claims coverage it does not have.
+     console.log('R:NO-DEVICE:' + e.message.slice(0, 60));
+   }`,
   (o) => {
+    if (/R:NO-DEVICE/.test(o)) {
+      // Verify the FAILURE is clean and named, which is the part that still
+      // matters without hardware: a game on a machine with no audio must get a
+      // clear error, not a crash or silence.
+      return { ok: /could not open audio device|audio init failed/i.test(o),
+               detail: 'no audio device on this machine; declined cleanly (CI)' };
+    }
     const m = /R:([\d.]+):(\d+)/.exec(o);
     return { ok: m && parseFloat(m[1]) < 50 && m[2] === '0',
              detail: m ? `${m[1]}ms, ${m[2]} underruns` : 'no result' };
