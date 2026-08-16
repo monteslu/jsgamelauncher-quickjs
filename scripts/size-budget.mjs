@@ -15,7 +15,14 @@ const WARN_MB = 15;
 const FAIL_MB = 20;
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const candidates = [join(ROOT, 'build', 'jsglq'), join(ROOT, 'build', 'jsglq.exe')];
+// build/ is pinned in CMakeLists for every generator, but multi-config
+// generators historically drop a config subdirectory in, so accept both.
+const candidates = [
+  join(ROOT, 'build', 'jsglq'),
+  join(ROOT, 'build', 'jsglq.exe'),
+  join(ROOT, 'build', 'Release', 'jsglq'),
+  join(ROOT, 'build', 'Release', 'jsglq.exe'),
+];
 const bin = candidates.find((p) => existsSync(p));
 if (!bin) {
   console.error('no binary found; build first');

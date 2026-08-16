@@ -124,7 +124,20 @@ jobs:
       # catches a broken link or a missing ANGLE dylib.
       - name: smoke test (macos/windows)
         if: matrix.platform != 'linux'
-        run: node -e "const{execFileSync}=require('child_process');const b=process.platform==='win32'?'build/jsglq.exe':'build/jsglq';console.log(execFileSync(b,['--version'],{encoding:'utf8'}));" 
+        shell: bash
+        run: |
+          set -eu
+          EXE=jsglq; [ "${{ matrix.platform }}" = "windows" ] && EXE=jsglq.exe
+          # Multi-config generators may still place it under a config subdir.
+          BIN=""
+          for c in "build/$EXE" "build/Release/$EXE"; do
+            [ -f "$c" ] && BIN="$c" && break
+          done
+          if [ -z "$BIN" ]; then
+            echo "no binary found; build/ contains:"; ls -R build | head -40; exit 1
+          fi
+          echo "running $BIN --version"
+          "./$BIN" --version
 
       - name: size budget
         shell: bash

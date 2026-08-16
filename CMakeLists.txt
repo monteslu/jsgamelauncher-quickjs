@@ -255,4 +255,13 @@ if(APPLE)
     INSTALL_RPATH "@loader_path")
 endif()
 
+# The binary always lands in build/, on every generator. Multi-config generators
+# (Visual Studio, Xcode) otherwise append the config name and produce
+# build/Release/jsglq.exe, which every script that looks in build/ would miss;
+# setting the per-config property explicitly pins the path everywhere.
 set_target_properties(jsglq PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/build)
+foreach(cfg ${CMAKE_CONFIGURATION_TYPES} Release Debug RelWithDebInfo MinSizeRel)
+  string(TOUPPER ${cfg} cfg_upper)
+  set_target_properties(jsglq PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY_${cfg_upper} ${CMAKE_SOURCE_DIR}/build)
+endforeach()
