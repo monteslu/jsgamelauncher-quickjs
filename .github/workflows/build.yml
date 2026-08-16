@@ -146,7 +146,11 @@ jobs:
       - name: bundle macOS libraries
         if: matrix.platform == 'darwin'
         shell: bash
-        run: node scripts/bundle-macos-libs.mjs build/jsglq
+        run: |
+          # The binary references @rpath/libSDL2, and the only copy lives in the
+          # source-built prefix; without this the bundler cannot resolve it.
+          export JSGLQ_EXTRA_LIB_DIRS="$PWD/../sdl2-prefix/lib:$PWD/../native-gles/angle/lib"
+          node scripts/bundle-macos-libs.mjs build/jsglq
 
       # A build that produces a binary which cannot boot is not a passing build.
       # This runs a real game headless and requires actual drawn pixels, because a
@@ -317,6 +321,17 @@ jobs:
               echo "FAIL: the above rpaths point outside the bundle"
               exit 1
             fi
+            # @rpath-relative is not the same as present. Assert each one has a
+            # real file beside the binary, or the archive fails at load with
+            # "Library not loaded: @rpath/..." on the user's machine.
+            for d in $(cat /tmp/deps.txt | grep '^@rpath/'); do
+              f="${d#@rpath/}"
+              if [ ! -f "$f" ]; then
+                echo "FAIL: $d is referenced but $f is not in the package"
+                ls -la
+                exit 1
+              fi
+            done
             echo "macOS bundle is self-contained"
           fi
 

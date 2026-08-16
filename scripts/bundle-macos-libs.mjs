@@ -79,20 +79,59 @@ while (queue.length) {
   const { deps, rpaths } = loadCommands(file);
 
   for (const dep of deps) {
-    if (isSystem(dep) || isRelocated(dep)) continue;
+    if (isSystem(dep)) continue;
 
     const name = basename(dep);
     const dest = join(destDir, name);
 
-    if (!existsSync(dest)) {
-      if (!existsSync(dep)) {
-        console.error(`  MISSING ${dep} (referenced by ${basename(file)})`);
+    /* An @rpath dependency is RELOCATABLE, which is not the same as PRESENT.
+       A library already built with an @rpath install name (SDL2 built from
+       source, ANGLE from the downloader) needs no rewrite but still has to be
+       copied into the bundle, or the binary fails at load with "Library not
+       loaded: @rpath/...". Skipping these outright shipped an archive missing
+       libSDL2 entirely. Resolve it against the rpath search paths to find the
+       real file. */
+    let source = dep;
+    if (isRelocated(dep)) {
+      if (existsSync(dest)) continue; // already in the bundle, nothing to do
+      const suffix = dep.replace(/^@(rpath|loader_path|executable_path)\//, '');
+      const searchDirs = [
+        dirname(file),
+        destDir,
+        ...rpaths
+          .filter((r) => !r.startsWith('@'))
+          .map((r) => r),
+        ...(process.env.JSGLQ_EXTRA_LIB_DIRS || '').split(':').filter(Boolean),
+      ];
+      const found = searchDirs.map((d) => join(d, suffix)).find((p) => existsSync(p));
+      if (!found) {
+        console.error(`  UNRESOLVED ${dep} (referenced by ${basename(file)})`);
+        console.error(`  searched: ${searchDirs.join(', ')}`);
         process.exit(1);
       }
-      copyFileSync(dep, dest);
+      source = found;
+    }
+
+    if (!existsSync(dest)) {
+      if (!existsSync(source)) {
+        console.error(`  MISSING ${source} (referenced by ${basename(file)})`);
+        process.exit(1);
+      }
+      copyFileSync(source, dest);
       chmodSync(dest, 0o755);
       copied++;
       console.log(`  bundled ${name} (${(statSync(dest).size / 1024).toFixed(0)} KB)`);
+    }
+
+    /* Already @rpath-relative: no reference to rewrite, but DO follow it so its
+       own dependencies get bundled too. */
+    if (isRelocated(dep)) {
+      if (!bundled.has(name)) {
+        bundled.add(name);
+        run('install_name_tool', ['-id', `@rpath/${name}`, dest]);
+        queue.push(dest);
+      }
+      continue;
     }
 
     /* Point the referrer at the copy beside the binary. */
@@ -169,6 +208,27 @@ for (const name of bundled) {
         '  It cannot be bundled by dependency walking and raises a modal dialog\n' +
         '  when its backing library is absent. Link against real SDL2 instead.',
     );
+    process.exit(1);
+  }
+}
+
+/* Every @rpath dependency must actually EXIST in the bundle. "Relocatable" and
+   "present" are different properties, and checking only the first is how an
+   archive shipped referencing @rpath/libSDL2 with no libSDL2 beside it. */
+{
+  const missing = [];
+  for (const f of [bin, ...[...bundled].map((n) => join(destDir, n))]) {
+    for (const dep of loadCommands(f).deps) {
+      if (isSystem(dep) || !isRelocated(dep)) continue;
+      const suffix = dep.replace(/^@(rpath|loader_path|executable_path)\//, '');
+      if (!existsSync(join(destDir, suffix))) {
+        missing.push(`${dep} (needed by ${basename(f)})`);
+      }
+    }
+  }
+  if (missing.length) {
+    console.error('BUNDLE INCOMPLETE — these are @rpath-relative but not present:');
+    missing.forEach((m) => console.error(`  ${m}`));
     process.exit(1);
   }
 }
