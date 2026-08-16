@@ -45,11 +45,19 @@
 #include <string.h>
 #endif
 
-/* Keep the symbol and give it C linkage, exactly as the wasm build does. */
-#ifdef __cplusplus
-#define EMSCRIPTEN_KEEPALIVE extern "C" __attribute__((used, visibility("default")))
+/* Keep the symbol and give it C linkage, exactly as the wasm build does.
+   MSVC has no __attribute__; __declspec(dllexport) is its "do not discard this
+   symbol" marker and works the same way when we link statically. */
+#if defined(_MSC_VER)
+#define JSGLQ_KEEPALIVE_ATTR __declspec(dllexport)
 #else
-#define EMSCRIPTEN_KEEPALIVE __attribute__((used, visibility("default")))
+#define JSGLQ_KEEPALIVE_ATTR __attribute__((used, visibility("default")))
+#endif
+
+#ifdef __cplusplus
+#define EMSCRIPTEN_KEEPALIVE extern "C" JSGLQ_KEEPALIVE_ATTR
+#else
+#define EMSCRIPTEN_KEEPALIVE JSGLQ_KEEPALIVE_ATTR
 #endif
 
 /* The engine does not call these, but they appear in emscripten.h and some

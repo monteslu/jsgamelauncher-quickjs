@@ -18,8 +18,10 @@ if(MSVC)
   # some C constructs more strictly than clang/gcc. These keep the shared sources
   # compiling without sprinkling _CRT_ ifdefs through code that is otherwise
   # perfectly portable.
+  # _USE_MATH_DEFINES: the MSVC CRT hides M_PI and friends behind it. The audio
+  # DSP sources use them freely, as every other toolchain defines them by default.
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE
-                          NOMINMAX WIN32_LEAN_AND_MEAN)
+                          _USE_MATH_DEFINES NOMINMAX WIN32_LEAN_AND_MEAN)
   add_compile_options(/utf-8)
 else()
   # Reproducible builds: without this, assert()/__FILE__ bake the builder's home
