@@ -26,6 +26,9 @@ void jsglq_events_mouse_button(JSContext *ctx, const SDL_MouseButtonEvent *m, bo
 void jsglq_events_mouse_motion(JSContext *ctx, const SDL_MouseMotionEvent *m);
 void jsglq_events_wheel(JSContext *ctx, const SDL_MouseWheelEvent *w);
 void jsglq_events_resize(JSContext *ctx, int width, int height);
+
+/* bind_gamepad.c */
+void jsglq_gamepad_device_event(const SDL_Event *ev);
 }
 
 struct JsglqWindow {
@@ -194,6 +197,14 @@ extern "C" bool jsglq_window_pump_ctx(JSContext *ctx)
 
         case SDL_MOUSEWHEEL:
             if (ctx) jsglq_events_wheel(ctx, &ev.wheel);
+            break;
+
+        /* Hotplug. Gamepad STATE is polled rather than event-driven (the Gamepad
+           API is a polling API), but connect/disconnect has to be handled here
+           or a pad plugged in mid-game is never opened. */
+        case SDL_JOYDEVICEADDED:
+        case SDL_JOYDEVICEREMOVED:
+            jsglq_gamepad_device_event(&ev);
             break;
 
         default:

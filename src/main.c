@@ -408,6 +408,10 @@ int main(int argc, char **argv)
     jsglq_bind_audio(engine);
     jsglq_bind_audio_decode(engine);
     jsglq_bind_worker(engine);
+    jsglq_bind_gamepad(engine);
+    /* After binding (which opens already-connected pads) so the rescan inside
+       the loader promotes them from raw joysticks to mapped controllers. */
+    jsglq_gamepad_load_db_file(runtime_dir);
     if (jsglq_bind_canvas2d(engine, bw, bh) != 0) {
         JS_FreeValue(ctx, global);
         jsglq_engine_free(engine);

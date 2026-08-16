@@ -19,6 +19,7 @@ import { installWorker } from './shims/worker.js';
 import { installAudio } from './shims/audio.js';
 import { installStorage } from './shims/storage.js';
 import { installXHR } from './shims/xhr.js';
+import { installGamepads } from './shims/gamepad.js';
 
 export function bootstrap({ width, height }) {
   installMisc(globalThis);
@@ -30,6 +31,9 @@ export function bootstrap({ width, height }) {
   installDocument(globalThis, { canvas, width, height });
   // Events last: it installs over document/window/canvas, all of which must exist.
   installEvents(globalThis, { canvas });
+  /* After installDocument (which creates navigator) and installEvents (which
+     provides Event + dispatchEvent for gamepadconnected). */
+  installGamepads(globalThis);
   if (globalThis.__jsglq_worker) installWorker(globalThis);
   if (globalThis.__jsglq_audio) installAudio(globalThis);
   return canvas;

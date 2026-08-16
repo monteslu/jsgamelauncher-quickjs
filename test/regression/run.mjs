@@ -319,6 +319,70 @@ check('unhandled rejections are LOUD, not silent',
   (o) => ({ ok: /UNHANDLED PROMISE REJECTION/.test(o) && /boom/.test(o),
             detail: /UNHANDLED/.test(o) ? 'reported with reason' : 'SILENTLY SWALLOWED' }));
 
+/* ----------------------------------------------------------------- gamepads -- */
+
+/* The Gamepad API shipped as a stub returning four nulls while the README claimed
+   it worked, and nothing caught it because a stub that answers plausibly looks
+   exactly like a working implementation. These tests use SDL's VIRTUAL joystick,
+   so they run with no hardware attached and cannot silently pass again. */
+
+check('gamepad: a connected pad is reported with the standard mapping',
+  `const h=globalThis.__jsglq_gamepad;
+   const dev=h.virtualAttach();
+   if(dev<0){ console.log('R:NO_VIRTUAL'); }
+   else {
+     const p=navigator.getGamepads().filter(Boolean).pop();
+     console.log('R:'+p.mapping+','+p.buttons.length+','+p.axes.length);
+     h.virtualDetach(dev);
+   }`,
+  (o) => ({ ok: /R:standard,17,4/.test(o), detail: (/R:(\S+)/.exec(o) || [])[1] }));
+
+check('gamepad: button presses reach JS in W3C standard order',
+  `const h=globalThis.__jsglq_gamepad;
+   const dev=h.virtualAttach();
+   const slot=navigator.getGamepads().filter(Boolean).pop().index;
+   // SDL's virtual gamepad: buttons 11..14 are dpad up/down/left/right, which
+   // the standard layout puts at 12..15.
+   const out=[];
+   for (const b of [0,11,12,13,14]) {
+     h.virtualSet(slot,'button',b,1);
+     const p=navigator.getGamepads()[slot];
+     out.push(p.buttons.map((x,i)=>x.pressed?i:null).filter(x=>x!==null).join('|'));
+     h.virtualSet(slot,'button',b,0);
+   }
+   h.virtualDetach(dev);
+   console.log('R:'+out.join(','));`,
+  (o) => ({ ok: /R:0,12,13,14,15/.test(o), detail: (/R:(\S+)/.exec(o) || [])[1] }));
+
+check('gamepad: axes are scaled to exactly -1..1',
+  `const h=globalThis.__jsglq_gamepad;
+   const dev=h.virtualAttach();
+   const slot=navigator.getGamepads().filter(Boolean).pop().index;
+   h.virtualSet(slot,'axis',0,32767);
+   const hi=navigator.getGamepads()[slot].axes[0];
+   h.virtualSet(slot,'axis',0,-32768);
+   const lo=navigator.getGamepads()[slot].axes[0];
+   h.virtualDetach(dev);
+   console.log('R:'+hi.toFixed(3)+','+lo.toFixed(3));`,
+  // -32768/32767 is -1.00003; clamping is what keeps a game's deadzone maths sane.
+  (o) => ({ ok: /R:1\.000,-1\.000/.test(o), detail: (/R:(\S+)/.exec(o) || [])[1] }));
+
+check('gamepad: disconnect leaves no phantom pad (MUST-FAIL control)',
+  `const h=globalThis.__jsglq_gamepad;
+   const before=navigator.getGamepads().filter(Boolean).length;
+   const dev=h.virtualAttach();
+   const during=navigator.getGamepads().filter(Boolean).length;
+   h.virtualDetach(dev);
+   const after=navigator.getGamepads().filter(Boolean).length;
+   console.log('R:'+before+','+during+','+after);`,
+  (o) => {
+    const m = /R:(\d+),(\d+),(\d+)/.exec(o);
+    if (!m) return { ok: false, detail: 'no result' };
+    const [, b, d, a] = m.map(Number);
+    return { ok: d === b + 1 && a === b,
+             detail: `before ${b}, attached ${d}, after detach ${a}` };
+  });
+
 /* ------------------------------------------------------------------- report -- */
 
 console.log(`\n${pass} passed, ${fail} failed`);

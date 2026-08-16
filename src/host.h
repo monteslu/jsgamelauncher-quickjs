@@ -81,6 +81,11 @@ int jsglq_bind_audio(JsglqEngine *e);      /* webaudio-node engine + SDL callbac
 int jsglq_bind_audio_decode(JsglqEngine *e);  /* mp3/wav/flac/ogg/aac/opus decode */
 void jsglq_audio_shutdown(void);
 int jsglq_bind_worker(JsglqEngine *e);     /* real OS-thread Workers */
+int jsglq_bind_gamepad(JsglqEngine *e);    /* SDL gamepads + controller DB */
+void jsglq_gamepad_init(void);
+void jsglq_gamepad_shutdown(void);
+int  jsglq_gamepad_load_db(const char *text);
+int  jsglq_gamepad_load_db_file(const char *runtime_dir);
 void jsglq_worker_shutdown(JSContext *ctx);
 void jsglq_pump_workers(JSContext *ctx);
 

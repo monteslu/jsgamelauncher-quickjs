@@ -232,6 +232,7 @@ add_executable(jsglq
   src/bind_image.c
   src/bind_audio.c
   src/bind_worker.c
+  src/bind_gamepad.c
   src/bundle.c
   src/sprite2d.c
   src/bind_gl.cpp
