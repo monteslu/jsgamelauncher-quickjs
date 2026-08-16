@@ -122,11 +122,16 @@ while (queue.length) {
   }
 }
 
-/* Re-sign: any install_name_tool edit invalidates the existing signature, and
-   an invalid signature is worse than none — macOS kills the process outright
-   rather than falling back. Ad-hoc signing is what an unsigned local build
-   already gets. */
-for (const f of [bin, ...[...bundled].map((n) => join(destDir, n))]) {
+/* Re-sign: any install_name_tool edit invalidates the existing signature, and on
+   Apple silicon an INVALID signature is fatal where an absent one is not.
+ *
+ * ORDER MATTERS, and getting it wrong is not a visible error — it is a HANG.
+ * Sign the dylibs FIRST and the executable LAST: the executable's signature
+ * covers its dependencies, so signing a dylib afterwards invalidates the
+ * executable again. Signing the binary first left every macOS runner stuck
+ * inside the loader on the first execution, with no output and no exit. */
+const signOrder = [...[...bundled].map((n) => join(destDir, n)), bin];
+for (const f of signOrder) {
   try {
     run('codesign', ['--force', '--sign', '-', '--timestamp=none', f]);
   } catch (err) {
@@ -135,7 +140,19 @@ for (const f of [bin, ...[...bundled].map((n) => join(destDir, n))]) {
   }
 }
 
-console.log(`macOS bundle: ${copied} libraries copied, ${rewritten} references rewritten, re-signed`);
+/* Prove the signatures are actually valid rather than assuming. `codesign -v`
+   catches the invalidated-by-later-signing case that otherwise only shows up as
+   a hang at runtime. */
+for (const f of signOrder) {
+  try {
+    run('codesign', ['--verify', '--strict', f]);
+  } catch (err) {
+    console.error(`  SIGNATURE INVALID for ${basename(f)}: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+console.log(`macOS bundle: ${copied} libraries copied, ${rewritten} references rewritten, ${signOrder.length} signed and verified`);
 
 /* Refuse to report success if anything absolute survived. */
 const { deps: finalDeps, rpaths: finalRpaths } = loadCommands(bin);

@@ -218,7 +218,25 @@ jobs:
           OUT="jsglq-${{ matrix.name }}"
           cd "dist/$OUT"
           EXE=./jsglq; [ -f ./jsglq.exe ] && EXE=./jsglq.exe || true
-          "$EXE" --version
+
+          # Diagnose BEFORE running. A binary that cannot start may hang in the
+          # loader rather than exit, and a bare timeout says nothing about why;
+          # this prints the signature state and the linkage first so the log
+          # explains the failure even when the run never returns.
+          if [ "${{ matrix.platform }}" = "darwin" ]; then
+            echo "--- codesign state ---"
+            codesign --verify --strict --verbose=2 "$EXE" 2>&1 | head -20 || echo "(signature INVALID)"
+            echo "--- linkage ---"
+            otool -L "$EXE" | head -20
+          fi
+
+          # Bound the run itself: a hang must fail with a message, not consume
+          # the step's whole budget.
+          if command -v timeout >/dev/null 2>&1; then
+            timeout 60 "$EXE" --version
+          else
+            "$EXE" --version
+          fi
 
           # --check opens a real headless GL context. Linux runners have no GPU,
           # so point it at the software rasterizer; macOS/Windows runners have no
