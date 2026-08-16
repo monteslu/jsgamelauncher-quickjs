@@ -1,6 +1,8 @@
 # jsgamelauncher-quickjs
 
 Run browser-API games with **no browser and no Node**, from a single ~11 MB binary.
+*Linux x64/arm64 today; macOS and Windows are not supported yet (see
+[Platform support](#platform-support)).*
 
 QuickJS + SDL2 + OpenGL ES. Games use `canvas`, `WebGL2`, `AudioContext`,
 `requestAnimationFrame`, `fetch`, `localStorage` and the Gamepad API exactly as they
@@ -92,6 +94,18 @@ on per-element JS loops by optimizing bindings — the bindings are already as t
 they get. If your game's hot loop is JS matrix math over thousands of objects, use a
 JIT runtime. If it draws sprites and text, this is the faster and much smaller
 option.
+
+## Platform support
+
+**Linux x64 and arm64 today.** That is what CI builds, tests and releases.
+
+macOS and Windows are not supported yet, and the reason is in the code rather than
+the build config: the host locates its runtime and fused payload through
+`readlink("/proc/self/exe")`, and it uses `<libgen.h>` / `<unistd.h>`. Both need
+platform equivalents, and both those targets need ANGLE for GLES instead of a
+system EGL. `native-gles` already ships ANGLE for them, so this is scoped work
+rather than a research problem — it is simply not done, and claiming a six-platform
+matrix that fails four ways would be worse than saying so.
 
 ## Building
 

@@ -10,49 +10,53 @@ jobs:
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    # Linux only, for now, and deliberately so.
+    #
+    # The host still contains POSIX-only code — readlink("/proc/self/exe") for
+    # locating the runtime and the fused payload, plus <libgen.h>/<unistd.h> — and
+    # macOS/Windows need ANGLE for GLES rather than a system EGL. Listing those
+    # targets here would produce a matrix that fails 4 of 6 ways on every push,
+    # which teaches everyone to ignore a red X. They go back in when the code
+    # actually supports them; see README "Platform support".
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { name: linux-x64,    os: ubuntu-22.04 }
-          - { name: linux-arm64,  os: ubuntu-22.04-arm }
-          - { name: macos-arm64,  os: macos-15 }
-          - { name: macos-x64,    os: macos-15-intel }
-          - { name: windows-x64,  os: windows-2022 }
-          - { name: windows-arm64, os: windows-11-arm }
+          - { name: linux-x64,   os: ubuntu-22.04 }
+          - { name: linux-arm64, os: ubuntu-22.04-arm }
+
+    # CMake expects native-gles and webaudio-node as SIBLINGS (../native-gles), which
+    # is how they sit in a normal dev checkout. actions/checkout refuses to write
+    # outside the workspace, so the launcher goes in a subdirectory and the siblings
+    # go beside it, reproducing that layout exactly.
+    defaults:
+      run:
+        working-directory: jsgamelauncher-quickjs
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: jsgamelauncher-quickjs
 
-      # native-gles and webaudio-node are consumed as SOURCE, compiled here with
-      # zero edits. They sit beside this repo in a normal checkout, so CI puts
-      # them where the CMake build expects them.
+      # Both are consumed as SOURCE and compiled here with zero edits.
       - name: checkout native-gles
         uses: actions/checkout@v4
         with:
           repository: monteslu/native-gles
-          path: ../native-gles
+          path: native-gles
       - name: checkout webaudio-node
         uses: actions/checkout@v4
         with:
           repository: monteslu/webaudio-node
-          path: ../webaudio-node
+          path: webaudio-node
 
-      - name: deps (linux)
-        if: startsWith(matrix.name, 'linux')
+      - name: deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build libsdl2-dev libegl-dev libgles-dev
-
-      - name: deps (macos)
-        if: startsWith(matrix.name, 'macos')
-        run: brew install cmake ninja sdl2
-
-      - name: deps (windows)
-        if: startsWith(matrix.name, 'windows')
-        run: |
-          vcpkg install sdl2:x64-windows
-          echo "CMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" >> $env:GITHUB_ENV
+          # mesa-utils + the software rasterizer: CI runners have no GPU, and the
+          # smoke test renders for real rather than trusting an exit code.
+          sudo apt-get install -y cmake ninja-build libsdl2-dev libegl-dev \
+                                  libgles-dev libgl1-mesa-dri xvfb
 
       - name: fetch quickjs
         run: node scripts/fetch-deps.mjs
@@ -65,11 +69,14 @@ jobs:
       # A build that produces a binary which cannot boot is not a passing build.
       # This runs a real game headless and requires actual drawn pixels, because a
       # blank frame is a failure that a zero exit code will happily report as success.
+      # A build that produces a binary which cannot boot is not a passing build.
+      # This runs a real game headless and requires actual drawn pixels: a blank
+      # frame is a failure that exit code 0 would happily report as success.
       - name: smoke test
-        if: startsWith(matrix.name, 'linux')
-        run: |
-          sudo apt-get install -y xvfb mesa-utils
-          xvfb-run -a node test/smoke.mjs
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          EGL_PLATFORM: surfaceless
+        run: xvfb-run -a node test/smoke.mjs
 
       - name: size budget
         shell: bash
@@ -108,7 +115,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: jsglq-${{ matrix.name }}
-          path: dist/jsglq-${{ matrix.name }}
+          path: jsgamelauncher-quickjs/dist/jsglq-${{ matrix.name }}
 
   release:
     name: publish release binaries
@@ -137,12 +144,17 @@ jobs:
   test:
     name: regression + harness self-test
     runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: jsgamelauncher-quickjs
+
     steps:
       - uses: actions/checkout@v4
+        with: { path: jsgamelauncher-quickjs }
       - uses: actions/checkout@v4
-        with: { repository: monteslu/native-gles, path: ../native-gles }
+        with: { repository: monteslu/native-gles, path: native-gles }
       - uses: actions/checkout@v4
-        with: { repository: monteslu/webaudio-node, path: ../webaudio-node }
+        with: { repository: monteslu/webaudio-node, path: webaudio-node }
       - run: |
           sudo apt-get update
           sudo apt-get install -y cmake libsdl2-dev libegl-dev libgles-dev xvfb
