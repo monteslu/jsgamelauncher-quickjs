@@ -46,6 +46,12 @@ extern "C" void *jsglq_window_native_handle(void)
 extern "C" int jsglq_window_open(int width, int height, const char *title,
                                  bool headless, bool fullscreen)
 {
+#ifdef SDL_MAIN_HANDLED
+    /* We keep our own main() (see SDL_MAIN_HANDLED in CMakeLists), so SDL never
+       ran its entry-point setup. This tells it that was deliberate; without it
+       SDL_Init refuses to start on Windows. */
+    SDL_SetMainReady();
+#endif
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
         fprintf(stderr, "jsglq: SDL_Init failed: %s\n", SDL_GetError());
         return -1;

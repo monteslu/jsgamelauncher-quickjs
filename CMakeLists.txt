@@ -248,6 +248,10 @@ if(WIN32)
   # than the default ~15ms scheduler tick. m/dl/pthread are POSIX and are folded
   # into the CRT here.
   target_link_libraries(jsglq PRIVATE winmm)
+  # SDL_MAIN_HANDLED: on Windows SDL2 #defines main to SDL_main and expects to
+  # supply the real entry point. We already have our own main() and a console
+  # subsystem, so tell SDL to keep its hands off it.
+  target_compile_definitions(jsglq PRIVATE SDL_MAIN_HANDLED=1)
 else()
   target_link_libraries(jsglq PRIVATE m dl pthread)
 endif()
