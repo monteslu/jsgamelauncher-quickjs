@@ -18,10 +18,35 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O2 -g")
 # differs machine to machine for no reason.
 add_compile_options(-ffile-prefix-map=${CMAKE_SOURCE_DIR}=.)
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(SDL2 REQUIRED sdl2)
-pkg_check_modules(EGL REQUIRED egl)
-pkg_check_modules(GLES REQUIRED glesv2)
+# GLES comes from the system on Linux and from ANGLE on macOS/Windows, which is
+# exactly how native-gles resolves it — the same ANGLE binaries, downloaded by that
+# project's own script, so the two cannot drift apart.
+set(ANGLE_DIR ${CMAKE_SOURCE_DIR}/../native-gles/angle)
+
+if(UNIX AND NOT APPLE)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(SDL2 REQUIRED sdl2)
+  pkg_check_modules(EGL REQUIRED egl)
+  pkg_check_modules(GLES REQUIRED glesv2)
+else()
+  find_package(SDL2 REQUIRED)
+  if(NOT EXISTS ${ANGLE_DIR})
+    message(FATAL_ERROR
+      "ANGLE not found at ${ANGLE_DIR}.\n"
+      "macOS and Windows have no system GLES. Fetch it with:\n"
+      "  cd ../native-gles && npm install --ignore-scripts && npm run download-angle")
+  endif()
+  set(EGL_INCLUDE_DIRS ${ANGLE_DIR}/include)
+  set(GLES_INCLUDE_DIRS ${ANGLE_DIR}/include)
+  if(APPLE)
+    set(EGL_LIBRARIES ${ANGLE_DIR}/lib/libEGL.dylib)
+    set(GLES_LIBRARIES ${ANGLE_DIR}/lib/libGLESv2.dylib)
+  else()
+    set(EGL_LIBRARIES ${ANGLE_DIR}/lib/libEGL.lib)
+    set(GLES_LIBRARIES ${ANGLE_DIR}/lib/libGLESv2.lib)
+  endif()
+  set(SDL2_LIBRARIES SDL2::SDL2)
+endif()
 
 set(QUICKJS_DIR ${CMAKE_SOURCE_DIR}/deps/quickjs)
 set(NATIVE_GLES_DIR ${CMAKE_SOURCE_DIR}/../native-gles/src)
@@ -126,6 +151,7 @@ add_custom_target(gl_table DEPENDS ${CMAKE_SOURCE_DIR}/src/gl_table.inc)
 add_executable(jsglq
   src/main.c
   src/engine.c
+  src/platform.c
   src/bind_core.c
   src/bind_io.c
   src/bind_canvas2d.c
@@ -159,5 +185,12 @@ target_link_libraries(jsglq PRIVATE
 target_link_directories(jsglq PRIVATE ${SDL2_LIBRARY_DIRS})
 
 add_dependencies(jsglq gl_table)
+
+if(APPLE)
+  # ANGLE ships beside the executable, so look there first at load time.
+  set_target_properties(jsglq PROPERTIES
+    BUILD_RPATH "@loader_path"
+    INSTALL_RPATH "@loader_path")
+endif()
 
 set_target_properties(jsglq PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/build)

@@ -1,8 +1,6 @@
 # jsgamelauncher-quickjs
 
 Run browser-API games with **no browser and no Node**, from a single ~11 MB binary.
-*Linux x64/arm64 today; macOS and Windows are not supported yet (see
-[Platform support](#platform-support)).*
 
 QuickJS + SDL2 + OpenGL ES. Games use `canvas`, `WebGL2`, `AudioContext`,
 `requestAnimationFrame`, `fetch`, `localStorage` and the Gamepad API exactly as they
@@ -97,15 +95,22 @@ option.
 
 ## Platform support
 
-**Linux x64 and arm64 today.** That is what CI builds, tests and releases.
+Six targets, the same set [native-gles](https://github.com/monteslu/native-gles)
+builds and ships:
 
-macOS and Windows are not supported yet, and the reason is in the code rather than
-the build config: the host locates its runtime and fused payload through
-`readlink("/proc/self/exe")`, and it uses `<libgen.h>` / `<unistd.h>`. Both need
-platform equivalents, and both those targets need ANGLE for GLES instead of a
-system EGL. `native-gles` already ships ANGLE for them, so this is scoped work
-rather than a research problem — it is simply not done, and claiming a six-platform
-matrix that fails four ways would be worse than saying so.
+| platform | GLES source | status |
+|---|---|---|
+| linux-x64, linux-arm64 | system EGL/GLES | built + smoke-tested in CI |
+| macos-arm64, macos-x64 | ANGLE (Metal) | built in CI; ANGLE ships beside the binary |
+| windows-x64, windows-arm64 | ANGLE (D3D11) | built in CI; ANGLE ships beside the binary |
+
+Platform-specific code is confined to `src/platform.c` — executable path, path
+splitting, mkdir, realpath, temp dir. Everything else is portable C/C++.
+
+macOS and Windows have no system GLES, so ANGLE is fetched with native-gles's own
+`download-angle` script rather than a second, divergent copy. CI runners have no
+display, so those two run a load-and-report check while Linux runs the full
+pixel-verifying smoke test.
 
 ## Building
 

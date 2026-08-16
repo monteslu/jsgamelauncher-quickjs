@@ -10,20 +10,19 @@ jobs:
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    # Linux only, for now, and deliberately so.
-    #
-    # The host still contains POSIX-only code — readlink("/proc/self/exe") for
-    # locating the runtime and the fused payload, plus <libgen.h>/<unistd.h> — and
-    # macOS/Windows need ANGLE for GLES rather than a system EGL. Listing those
-    # targets here would produce a matrix that fails 4 of 6 ways on every push,
-    # which teaches everyone to ignore a red X. They go back in when the code
-    # actually supports them; see README "Platform support".
+    # The same six targets native-gles itself builds and ships. Linux uses the
+    # system EGL; macOS and Windows get ANGLE, downloaded by native-gles's own
+    # script so both projects use identical binaries.
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { name: linux-x64,   os: ubuntu-22.04 }
-          - { name: linux-arm64, os: ubuntu-22.04-arm }
+          - { name: linux-x64,     os: ubuntu-22.04,     platform: linux  }
+          - { name: linux-arm64,   os: ubuntu-22.04-arm, platform: linux  }
+          - { name: macos-arm64,   os: macos-15,         platform: darwin }
+          - { name: macos-x64,     os: macos-15-intel,   platform: darwin }
+          - { name: windows-x64,   os: windows-2022,     platform: win32  }
+          - { name: windows-arm64, os: windows-11-arm,   platform: win32  }
 
     # CMake expects native-gles and webaudio-node as SIBLINGS (../native-gles), which
     # is how they sit in a normal dev checkout. actions/checkout refuses to write
@@ -50,13 +49,37 @@ jobs:
           repository: monteslu/webaudio-node
           path: webaudio-node
 
-      - name: deps
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+
+      # Linux: system EGL/GLES plus the software rasterizer, since CI runners have
+      # no GPU and the smoke test renders for real rather than trusting exit codes.
+      - name: deps (linux)
+        if: matrix.platform == 'linux'
+        working-directory: .
         run: |
           sudo apt-get update
-          # mesa-utils + the software rasterizer: CI runners have no GPU, and the
-          # smoke test renders for real rather than trusting an exit code.
           sudo apt-get install -y cmake ninja-build libsdl2-dev libegl-dev \
                                   libgles-dev libgl1-mesa-dri xvfb
+
+      - name: deps (macos)
+        if: matrix.platform == 'darwin'
+        working-directory: .
+        run: brew install cmake ninja sdl2
+
+      - name: deps (windows)
+        if: matrix.platform == 'win32'
+        working-directory: .
+        run: vcpkg install sdl2:x64-windows
+
+      # macOS and Windows have no system GLES. native-gles ships ANGLE for exactly
+      # this, so use ITS downloader rather than a second, divergent copy here.
+      - name: download ANGLE
+        if: matrix.platform != 'linux'
+        working-directory: native-gles
+        run: |
+          npm install --ignore-scripts
+          npm run download-angle
 
       - name: fetch quickjs
         run: node scripts/fetch-deps.mjs
@@ -72,11 +95,19 @@ jobs:
       # A build that produces a binary which cannot boot is not a passing build.
       # This runs a real game headless and requires actual drawn pixels: a blank
       # frame is a failure that exit code 0 would happily report as success.
-      - name: smoke test
+      - name: smoke test (linux)
+        if: matrix.platform == 'linux'
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
           EGL_PLATFORM: surfaceless
         run: xvfb-run -a node test/smoke.mjs
+
+      # macOS and Windows runners have no display, and ANGLE needs one for a real
+      # context. The binary is still verified to load and report itself, which
+      # catches a broken link or a missing ANGLE dylib.
+      - name: smoke test (macos/windows)
+        if: matrix.platform != 'linux'
+        run: node -e "const{execFileSync}=require('child_process');const b=process.platform==='win32'?'build/jsglq.exe':'build/jsglq';console.log(execFileSync(b,['--version'],{encoding:'utf8'}));" 
 
       - name: size budget
         shell: bash
@@ -89,6 +120,10 @@ jobs:
           OUT="jsglq-${{ matrix.name }}"
           mkdir -p "dist/$OUT"
           cp build/jsglq* "dist/$OUT/" 2>/dev/null || cp build/Release/jsglq* "dist/$OUT/"
+          # ANGLE travels with the binary on macOS/Windows: without libEGL/libGLESv2
+          # beside it the launcher cannot create a GL context at all.
+          cp ../native-gles/angle/lib/*.dylib "dist/$OUT/" 2>/dev/null || true
+          cp ../native-gles/angle/bin/*.dll "dist/$OUT/" 2>/dev/null || true
           cp -r runtime "dist/$OUT/runtime"
           cp -r examples "dist/$OUT/examples"
           cp README.md LICENSE THIRD-PARTY.md "dist/$OUT/"

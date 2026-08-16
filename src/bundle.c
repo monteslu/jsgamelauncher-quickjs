@@ -26,9 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
-#include <sys/stat.h>
-#include <sys/types.h>
+#include "platform.h"
 
 #define JSGLQ_MAGIC "JSGLQBND"     /* 8 bytes */
 #define TRAILER_SIZE 32            /* magic(8) + version(4) + offset(8) + size(8) + crc(4) */
@@ -105,15 +103,9 @@ bool jsglq_bundle_find(const char *exe_path, BundleInfo *out)
  */
 static bool make_parent_dirs(const char *path)
 {
-    char tmp[4096];
-    snprintf(tmp, sizeof(tmp), "%s", path);
-    for (char *p = tmp + 1; *p; p++) {
-        if (*p != '/') continue;
-        *p = 0;
-        if (mkdir(tmp, 0755) != 0 && errno != EEXIST) return false;
-        *p = '/';
-    }
-    return true;
+    char dir[4096];
+    jsglq_dirname(path, dir, sizeof(dir));
+    return jsglq_mkdir_p(dir);
 }
 
 bool jsglq_bundle_extract(const char *exe_path, const BundleInfo *info,
@@ -128,7 +120,7 @@ bool jsglq_bundle_extract(const char *exe_path, const BundleInfo *info,
     uint32_t count = read_u32le(hdr);
     if (count > 100000) { fclose(in); return false; }
 
-    if (mkdir(dest_dir, 0755) != 0 && errno != EEXIST) { fclose(in); return false; }
+    if (!jsglq_mkdir_p(dest_dir)) { fclose(in); return false; }
 
     for (uint32_t i = 0; i < count; i++) {
         if (fread(hdr, 1, 8, in) != 8) { fclose(in); return false; }
@@ -179,14 +171,13 @@ bool jsglq_bundle_prepare(const char *exe_path, char *out_dir, size_t out_sz)
     BundleInfo info;
     if (!jsglq_bundle_find(exe_path, &info)) return false;
 
-    const char *tmp = getenv("TMPDIR");
-    if (!tmp || !*tmp) tmp = "/tmp";
+    char tmp[4096];
+    jsglq_temp_dir(tmp, sizeof(tmp));
     snprintf(out_dir, out_sz, "%s/jsglq-fused-%08x", tmp, info.crc);
 
     char stamp[4096];
     snprintf(stamp, sizeof(stamp), "%s/.unpacked", out_dir);
-    struct stat st;
-    if (stat(stamp, &st) == 0) return true;    /* already unpacked */
+    if (jsglq_is_file(stamp)) return true;     /* already unpacked */
 
     if (!jsglq_bundle_extract(exe_path, &info, out_dir)) {
         fprintf(stderr, "jsglq: fused payload could not be unpacked to %s\n", out_dir);

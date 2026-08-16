@@ -22,9 +22,7 @@
 #include <string.h>
 #include <time.h>
 #include <stdbool.h>
-#include <sys/stat.h>
-#include <libgen.h>
-#include <unistd.h>
+#include "platform.h"
 
 /* window.cpp */
 int  jsglq_window_open(int width, int height, const char *title,
@@ -146,11 +144,7 @@ static void usage(void)
         "  jsglq --headless --frames=60 ./g   render 60 frames with no window (CI)\n");
 }
 
-static bool is_dir(const char *p)
-{
-    struct stat st;
-    return stat(p, &st) == 0 && S_ISDIR(st.st_mode);
-}
+static bool is_dir(const char *p) { return jsglq_is_dir(p); }
 
 /* Entry resolution, matching the .jsgame contract rungame established. */
 static bool resolve_entry(const char *game_path, char *dir_out, size_t dir_sz,
@@ -162,13 +156,8 @@ static bool resolve_entry(const char *game_path, char *dir_out, size_t dir_sz,
 
     if (!is_dir(game_path)) {
         /* A file: its directory is the game root. */
-        char tmp[4096];
-        snprintf(tmp, sizeof(tmp), "%s", game_path);
-        char *d = dirname(tmp);
-        snprintf(dir_out, dir_sz, "%s", d);
-        char tmp2[4096];
-        snprintf(tmp2, sizeof(tmp2), "%s", game_path);
-        snprintf(entry_out, entry_sz, "%s", basename(tmp2));
+        jsglq_dirname(game_path, dir_out, dir_sz);
+        jsglq_basename(game_path, entry_out, entry_sz);
         return true;
     }
 
@@ -193,8 +182,7 @@ static bool resolve_entry(const char *game_path, char *dir_out, size_t dir_sz,
                 entry_out[q2 - q1 - 1] = 0;
                 char full[8192];
                 snprintf(full, sizeof(full), "%s/%s", dir_out, entry_out);
-                struct stat st;
-                if (stat(full, &st) == 0) return true;
+                        if (jsglq_is_file(full)) return true;
             }
         }
     }
@@ -202,8 +190,7 @@ static bool resolve_entry(const char *game_path, char *dir_out, size_t dir_sz,
     for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
         char full[8192];
         snprintf(full, sizeof(full), "%s/%s", game_path, candidates[i]);
-        struct stat st;
-        if (stat(full, &st) == 0) {
+        if (jsglq_is_file(full)) {
             snprintf(entry_out, entry_sz, "%s", candidates[i]);
             return true;
         }
@@ -278,9 +265,7 @@ int main(int argc, char **argv)
     char fused_dir[4096];
     {
         char self[4096];
-        ssize_t sn = readlink("/proc/self/exe", self, sizeof(self) - 1);
-        if (sn > 0) {
-            self[sn] = 0;
+        if (jsglq_exe_path(self, sizeof(self))) {
             if (jsglq_bundle_prepare(self, fused_dir, sizeof(fused_dir))) {
                 opt.game_path = fused_dir;
                 /* The fused payload carries the runtime layer alongside the game,
@@ -288,7 +273,7 @@ int main(int argc, char **argv)
                 static char fused_runtime[4096];
                 snprintf(fused_runtime, sizeof(fused_runtime),
                          "%s/.jsglq-runtime", fused_dir);
-                setenv("JSGLQ_RUNTIME_DIR", fused_runtime, 1);
+                jsglq_setenv("JSGLQ_RUNTIME_DIR", fused_runtime);
             }
         }
     }
@@ -313,9 +298,7 @@ int main(int argc, char **argv)
     } else {
         /* Default to the game's own name: a window called after the launcher tells
            the player nothing, especially with several open. */
-        char tmp[4096];
-        snprintf(tmp, sizeof(tmp), "%s", game_dir);
-        snprintf(title_buf, sizeof(title_buf), "%s", basename(tmp));
+        jsglq_basename(game_dir, title_buf, sizeof(title_buf));
     }
 
     if (jsglq_window_open(opt.width, opt.height, title_buf,
@@ -336,10 +319,9 @@ int main(int argc, char **argv)
         snprintf(runtime_dir, sizeof(runtime_dir), "%s", env_rt);
     } else {
         char exe[4096];
-        ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
-        if (n > 0) {
-            exe[n] = 0;
-            char *d = dirname(exe);
+        if (jsglq_exe_path(exe, sizeof(exe))) {
+            char d[4096];
+            jsglq_dirname(exe, d, sizeof(d));
             snprintf(runtime_dir, sizeof(runtime_dir), "%s/../runtime", d);
         } else {
             snprintf(runtime_dir, sizeof(runtime_dir), "./runtime");

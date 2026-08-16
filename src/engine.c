@@ -15,8 +15,7 @@
 #include <stdarg.h>
 #include <time.h>
 #include <limits.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#include "platform.h"
 
 #define MAX_PATH_LEN 4096
 
@@ -113,7 +112,7 @@ static bool resolve_in_root(JsglqEngine *e, const char *rel, char *out, size_t o
     if (n < 0 || (size_t)n >= sizeof(joined)) return false;
 
     char resolved[MAX_PATH_LEN];
-    if (!realpath(joined, resolved)) return false;
+    if (!jsglq_realpath(joined, resolved, sizeof(resolved))) return false;
 
     size_t root_len = strlen(e->game_dir);
     if (strncmp(resolved, e->game_dir, root_len) != 0) return false;
@@ -203,7 +202,7 @@ bool jsglq_asset_write(JsglqEngine *e, const char *rel, const uint8_t *data, siz
     if (!slash) return false;
     *slash = 0;
     char resolved_parent[MAX_PATH_LEN];
-    if (!realpath(parent, resolved_parent)) return false;
+    if (!jsglq_realpath(parent, resolved_parent, sizeof(resolved_parent))) return false;
     size_t root_len = strlen(e->game_dir);
     if (strncmp(resolved_parent, e->game_dir, root_len) != 0) return false;
     if (resolved_parent[root_len] != '/' && resolved_parent[root_len] != '\0') return false;
@@ -219,8 +218,7 @@ bool jsglq_asset_exists(JsglqEngine *e, const char *rel)
 {
     char path[MAX_PATH_LEN];
     if (!resolve_asset(e, rel, path, sizeof(path))) return false;
-    struct stat st;
-    return stat(path, &st) == 0 && S_ISREG(st.st_mode);
+    return jsglq_is_file(path);
 }
 
 /* -------------------------------------------------------------- module loader - */
@@ -536,7 +534,7 @@ JsglqEngine *jsglq_engine_new(const JsglqConfig *cfg)
     JsglqEngine *e = (JsglqEngine *)calloc(1, sizeof(JsglqEngine));
     if (!e) return NULL;
 
-    if (!realpath(cfg->game_dir, e->game_dir)) {
+    if (!jsglq_realpath(cfg->game_dir, e->game_dir, sizeof(e->game_dir))) {
         fprintf(stderr, "jsglq: cannot resolve game dir '%s'\n", cfg->game_dir);
         free(e);
         return NULL;
