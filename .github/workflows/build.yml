@@ -151,9 +151,22 @@ jobs:
           mkdir -p "dist/$OUT"
           cp build/jsglq* "dist/$OUT/" 2>/dev/null || cp build/Release/jsglq* "dist/$OUT/"
           # ANGLE travels with the binary on macOS/Windows: without libEGL/libGLESv2
-          # beside it the launcher cannot create a GL context at all.
-          cp ../native-gles/angle/lib/*.dylib "dist/$OUT/" 2>/dev/null || true
-          cp ../native-gles/angle/bin/*.dll "dist/$OUT/" 2>/dev/null || true
+          # beside it the launcher cannot create a GL context at all. The downloader
+          # puts BOTH dylibs and DLLs in angle/lib (not angle/bin), and a missing
+          # copy here ships an archive that cannot render, so this asserts rather
+          # than falling through to a silent `|| true`.
+          if [ "${{ matrix.platform }}" != "linux" ]; then
+            ANGLE=../native-gles/angle/lib
+            n=0
+            for f in "$ANGLE"/*.dylib "$ANGLE"/*.dll; do
+              [ -f "$f" ] || continue
+              cp "$f" "dist/$OUT/"; n=$((n+1))
+            done
+            if [ "$n" -eq 0 ]; then
+              echo "no ANGLE runtime libraries found in $ANGLE"; ls -la "$ANGLE" || true; exit 1
+            fi
+            echo "bundled $n ANGLE libraries"
+          fi
           cp -r runtime "dist/$OUT/runtime"
           cp -r examples "dist/$OUT/examples"
           cp README.md LICENSE THIRD-PARTY.md "dist/$OUT/"
