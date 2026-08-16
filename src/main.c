@@ -318,14 +318,38 @@ int main(int argc, char **argv)
     if (env_rt && *env_rt) {
         snprintf(runtime_dir, sizeof(runtime_dir), "%s", env_rt);
     } else {
-        char exe[4096];
+        /*
+         * Find the runtime layer, trying both real layouts.
+         *
+         * A release archive puts runtime/ BESIDE the binary; a dev build leaves the
+         * binary in build/ with runtime/ one level up. Checking only the dev layout
+         * means a downloaded release cannot start at all — which is exactly what a
+         * packaging test caught here.
+         */
+        char exe[4096], d[4096];
+        runtime_dir[0] = 0;
         if (jsglq_exe_path(exe, sizeof(exe))) {
-            char d[4096];
             jsglq_dirname(exe, d, sizeof(d));
-            snprintf(runtime_dir, sizeof(runtime_dir), "%s/../runtime", d);
-        } else {
-            snprintf(runtime_dir, sizeof(runtime_dir), "./runtime");
+
+            char candidate[4096], probe[4096];
+
+            /* Beside the binary (release archive). */
+            snprintf(candidate, sizeof(candidate), "%s/runtime", d);
+            snprintf(probe, sizeof(probe), "%s/bootstrap.js", candidate);
+            if (jsglq_is_file(probe)) {
+                snprintf(runtime_dir, sizeof(runtime_dir), "%s", candidate);
+            }
+
+            /* One level up (dev tree: build/jsglq + runtime/). */
+            if (!runtime_dir[0]) {
+                snprintf(candidate, sizeof(candidate), "%s/../runtime", d);
+                snprintf(probe, sizeof(probe), "%s/bootstrap.js", candidate);
+                if (jsglq_is_file(probe)) {
+                    snprintf(runtime_dir, sizeof(runtime_dir), "%s", candidate);
+                }
+            }
         }
+        if (!runtime_dir[0]) snprintf(runtime_dir, sizeof(runtime_dir), "./runtime");
     }
 
     JsglqConfig cfg = {
