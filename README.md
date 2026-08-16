@@ -3,8 +3,9 @@
 Run browser-API games with **no browser and no Node**, from a single ~11 MB binary.
 
 QuickJS + SDL2 + OpenGL ES. Games use `canvas`, `WebGL2`, `AudioContext`,
-`requestAnimationFrame`, `fetch`, `localStorage` and the Gamepad API exactly as they
-would in a page — the same `main.js` runs in a browser and here.
+`requestAnimationFrame`, `fetch` and `localStorage` exactly as they would in a page
+— the same `main.js` runs in a browser and here. (Gamepads are **not** wired up
+yet; see below.)
 
 ```bash
 ./jsglq examples/hello-canvas          # play a game directory
@@ -162,13 +163,17 @@ every attribution requirement.
 |---|---|
 | WebGL2 | 247 entry points; three.js r183 renders (PBR, instancing, skinning, shadows) |
 | Canvas 2D | rects, text, images, transforms, and the full path API |
-| Input | keyboard (real `KeyboardEvent.code`), mouse, pointer, wheel, gamepad |
+| Input | keyboard (real `KeyboardEvent.code`), mouse, pointer, wheel — **no gamepad** |
 | Audio | mp3/wav/flac/ogg decode, Web Audio graph, `<audio>`, **~12 ms latency** |
 | Workers | real OS threads, **2.5–3.4× measured speedup** |
 | Storage | `localStorage` persists to disk; `sessionStorage` separate |
 | Networking | `fetch` and `XHR`, rooted at the game directory |
 
-**Not supported:** WebAssembly (deferred — WAMR trails V8 at wasm by more than
+**Not supported:** the **Gamepad API** — `navigator.getGamepads()` exists but
+always returns no controllers, so a game will silently see none. SDL is initialized
+with `SDL_INIT_GAMECONTROLLER` but no controller events are forwarded to JS yet. Use
+[jsgamelauncher](https://github.com/monteslu/jsgamelauncher) if your game needs a
+controller. WebAssembly (deferred — WAMR trails V8 at wasm by more than
 QuickJS trails V8 at JS, so wasm games get a better experience on jsgamelauncher),
 video playback, gradients, and patterns. Unimplemented Canvas methods **throw with
 their own name** rather than silently doing nothing.

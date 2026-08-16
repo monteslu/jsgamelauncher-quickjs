@@ -144,7 +144,22 @@ export function installDocument(g, { canvas, width, height }) {
     language: 'en-US',
     languages: ['en-US'],
     hardwareConcurrency: 4,
-    getGamepads: () => [null, null, null, null],
+    // NOT IMPLEMENTED. This returns an empty list rather than throwing because
+    // a game polling it every frame inside rAF would be unrunnable otherwise —
+    // but it warns ONCE, because the previous version returned four nulls
+    // silently and a game simply believed no controller was attached. A stub
+    // that looks like a working answer is worse than one that fails: it was
+    // wrong for a whole release without anything surfacing it.
+    getGamepads: () => {
+      if (!g.__jsglqGamepadWarned) {
+        g.__jsglqGamepadWarned = true;
+        console.warn(
+          'jsglq: navigator.getGamepads() is NOT implemented — no controller ' +
+            'will ever be reported. Use jsgamelauncher if your game needs one.',
+        );
+      }
+      return [];
+    },
   };
 
   g.location = g.location || {
