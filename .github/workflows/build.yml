@@ -231,12 +231,28 @@ jobs:
           fi
 
           # Bound the run itself: a hang must fail with a message, not consume
-          # the step's whole budget.
-          if command -v timeout >/dev/null 2>&1; then
-            timeout 60 "$EXE" --version
-          else
-            "$EXE" --version
-          fi
+          # the step's whole budget. macOS ships NEITHER timeout nor gtimeout, so
+          # a `command -v timeout` guard silently degrades to an unbounded run
+          # there — which is exactly where the hang is. Use a portable watchdog.
+          run_bounded() {
+            "$@" & local pid=$!
+            local n=0
+            while kill -0 "$pid" 2>/dev/null; do
+              n=$((n+1))
+              if [ "$n" -gt 60 ]; then
+                echo "TIMEOUT: '$*' did not return within 60s"
+                # A sample tells us WHERE it is stuck, which a timeout alone cannot.
+                if command -v sample >/dev/null 2>&1; then
+                  sample "$pid" 2 -mayDie 2>/dev/null | head -60 || true
+                fi
+                kill -9 "$pid" 2>/dev/null || true
+                return 124
+              fi
+              sleep 1
+            done
+            wait "$pid"
+          }
+          run_bounded "$EXE" --version
 
           # --check opens a real headless GL context. Linux runners have no GPU,
           # so point it at the software rasterizer; macOS/Windows runners have no
