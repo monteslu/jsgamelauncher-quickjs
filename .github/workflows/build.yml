@@ -87,7 +87,10 @@ jobs:
           curl -fsSL -o SDL2.tar.gz \
             https://github.com/libsdl-org/SDL/releases/download/release-2.32.4/SDL2-2.32.4.tar.gz
           tar xzf SDL2.tar.gz
+          # -g0 and a prefix map so the runner's absolute source paths are not
+          # baked into the shipped dylib's debug strings.
           cmake -S SDL2-2.32.4 -B sdl2-build -G Ninja \
+            -DCMAKE_C_FLAGS="-g0 -ffile-prefix-map=$PWD=." \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$PWD/sdl2-prefix" \
             -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST=OFF
