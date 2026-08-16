@@ -30,7 +30,11 @@
 #include <stdio.h>
 
 /* webaudio-node's C ABI (compiled natively; see CMakeLists.txt). */
-extern int   createAudioGraph(int sample_rate, int channels);
+/* The real signature has FOUR parameters. Declaring two meant buffer_size and
+   is_realtime were read from whatever happened to be in those registers, and
+   is_realtime gates time handling all through the engine. */
+extern int   createAudioGraph(int sample_rate, int channels, int buffer_size,
+                             bool is_realtime);
 extern void  destroyAudioGraph(int graph_id);
 extern int   createNode(int graph_id, const char *type);
 extern void  connectNodes(int graph_id, int src, int dst);
@@ -41,6 +45,11 @@ extern void  startNode(int graph_id, int node_id, double when);
 extern void  stopNode(int graph_id, int node_id, double when);
 extern int   registerBuffer(int graph_id, float *data, int length, int channels, int sample_rate);
 extern void  setNodeBufferId(int graph_id, int node_id, int buffer_id);
+extern void  setWaveShaperCurve(int graph_id, int node_id, float *curve, int len);
+extern void  setWaveShaperOversample(int graph_id, int node_id, const char *mode);
+extern void  setIIRFilterCoefficients(int graph_id, int node_id,
+                                      float *feedforward, int ff_len,
+                                      float *feedback, int fb_len);
 extern double getGraphCurrentTime(int graph_id);
 extern void  setGraphCurrentTime(int graph_id, double t);
 extern void  scheduleParamEvent(int graph_id, int node_id, int param_id,
@@ -121,7 +130,9 @@ static JSValue js_audio_init(JSContext *ctx, JSValueConst this_val,
 
     g_audio.sample_rate = have.freq;
     g_audio.channels = have.channels;
-    g_audio.graph = createAudioGraph(have.freq, have.channels);
+    /* is_realtime = true: this graph is driven by the SDL device callback,
+       so the host advances time rather than the engine. */
+    g_audio.graph = createAudioGraph(have.freq, have.channels, have.samples, true);
     if (g_audio.graph < 0) {
         SDL_CloseAudioDevice(g_audio.dev);
         return jsglq_throw(ctx, "audio graph creation failed");
@@ -264,6 +275,89 @@ static JSValue js_set_node_buffer(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+/* Borrow a Float32Array's backing memory. Returns NULL and leaves an exception
+   pending when the argument is not one. The pointer is only valid until JS runs
+   again, which is fine: every caller hands it straight to the engine, which
+   copies. */
+static float *float32_data(JSContext *ctx, JSValueConst v, int *out_len)
+{
+    size_t off = 0, blen = 0, bpe = 0;
+    JSValue abuf = JS_GetTypedArrayBuffer(ctx, v, &off, &blen, &bpe);
+    if (JS_IsException(abuf)) {
+        /* JS_GetException RETURNS the value; dropping it without freeing leaks
+           one JSValue per failed call. */
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return NULL;
+    }
+    size_t total = 0;
+    uint8_t *base = JS_GetArrayBuffer(ctx, &total, abuf);
+    JS_FreeValue(ctx, abuf);
+    if (!base) return NULL;
+    *out_len = (int)(blen / sizeof(float));
+    return (float *)(base + off);
+}
+
+static JSValue js_set_waveshaper_curve(JSContext *ctx, JSValueConst this_val,
+                                       int argc, JSValueConst *argv)
+{
+    if (!g_audio.running) return jsglq_throw(ctx, "audio not initialized");
+    if (argc < 2) return jsglq_throw(ctx, "setWaveShaperCurve(node, Float32Array)");
+    int32_t node = 0;
+    JS_ToInt32(ctx, &node, argv[0]);
+
+    /* A null curve is legal in the spec and means "pass through". */
+    if (JS_IsNull(argv[1]) || JS_IsUndefined(argv[1])) {
+        WITH_GRAPH_LOCK({ setWaveShaperCurve(g_audio.graph, node, NULL, 0); });
+        return JS_UNDEFINED;
+    }
+    int len = 0;
+    float *data = float32_data(ctx, argv[1], &len);
+    if (!data) return jsglq_throw(ctx, "setWaveShaperCurve: curve must be a Float32Array");
+    WITH_GRAPH_LOCK({ setWaveShaperCurve(g_audio.graph, node, data, len); });
+    return JS_UNDEFINED;
+}
+
+static JSValue js_set_waveshaper_oversample(JSContext *ctx, JSValueConst this_val,
+                                            int argc, JSValueConst *argv)
+{
+    if (!g_audio.running) return jsglq_throw(ctx, "audio not initialized");
+    if (argc < 2) return jsglq_throw(ctx, "setWaveShaperOversample(node, mode)");
+    int32_t node = 0;
+    JS_ToInt32(ctx, &node, argv[0]);
+    const char *mode = JS_ToCString(ctx, argv[1]);
+    if (!mode) return JS_EXCEPTION;
+    WITH_GRAPH_LOCK({ setWaveShaperOversample(g_audio.graph, node, mode); });
+    JS_FreeCString(ctx, mode);
+    return JS_UNDEFINED;
+}
+
+static JSValue js_set_iir_coefficients(JSContext *ctx, JSValueConst this_val,
+                                       int argc, JSValueConst *argv)
+{
+    if (!g_audio.running) return jsglq_throw(ctx, "audio not initialized");
+    if (argc < 3)
+        return jsglq_throw(ctx, "setIIRCoefficients(node, feedforward, feedback)");
+    int32_t node = 0;
+    JS_ToInt32(ctx, &node, argv[0]);
+
+    int ff_len = 0, fb_len = 0;
+    float *ff = float32_data(ctx, argv[1], &ff_len);
+    if (!ff) return jsglq_throw(ctx, "setIIRCoefficients: feedforward must be a Float32Array");
+    float *fb = float32_data(ctx, argv[2], &fb_len);
+    if (!fb) return jsglq_throw(ctx, "setIIRCoefficients: feedback must be a Float32Array");
+
+    /* The spec requires a non-zero leading feedback coefficient; a zero there
+       divides by zero in the filter and produces silence or NaNs downstream,
+       which is far harder to diagnose than a throw here. */
+    if (fb_len < 1 || fb[0] == 0.0f)
+        return jsglq_throw(ctx, "setIIRCoefficients: feedback[0] must be non-zero");
+
+    WITH_GRAPH_LOCK({
+        setIIRFilterCoefficients(g_audio.graph, node, ff, ff_len, fb, fb_len);
+    });
+    return JS_UNDEFINED;
+}
+
 static JSValue js_current_time(JSContext *ctx, JSValueConst this_val,
                                int argc, JSValueConst *argv)
 {
@@ -324,6 +418,12 @@ int jsglq_bind_audio(JsglqEngine *e)
         JS_NewCFunction(ctx, js_register_buffer, "registerBuffer", 3));
     JS_SetPropertyStr(ctx, a, "setNodeBuffer",
         JS_NewCFunction(ctx, js_set_node_buffer, "setNodeBuffer", 2));
+    JS_SetPropertyStr(ctx, a, "setWaveShaperCurve",
+        JS_NewCFunction(ctx, js_set_waveshaper_curve, "setWaveShaperCurve", 2));
+    JS_SetPropertyStr(ctx, a, "setWaveShaperOversample",
+        JS_NewCFunction(ctx, js_set_waveshaper_oversample, "setWaveShaperOversample", 2));
+    JS_SetPropertyStr(ctx, a, "setIIRCoefficients",
+        JS_NewCFunction(ctx, js_set_iir_coefficients, "setIIRCoefficients", 3));
     JS_SetPropertyStr(ctx, a, "currentTime",
         JS_NewCFunction(ctx, js_current_time, "currentTime", 0));
     JS_SetPropertyStr(ctx, a, "scheduleParam",

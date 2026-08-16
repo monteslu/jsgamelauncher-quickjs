@@ -16,6 +16,16 @@ const PARAM = {
   frequency: 0, detune: 1, gain: 2, Q: 3, delayTime: 4, pan: 5, offset: 6,
   type: 7, playbackOffset: 8, playbackDuration: 9, loop: 10,
   loopStart: 11, loopEnd: 12,
+  // Panner and compressor. The engine defines these ids and the DSP nodes have
+  // working setters, but audio_graph_simple.cpp's setNodeParameter does not
+  // dispatch them yet — so assignments are accepted and currently inert. They
+  // are wired here so a game's code is correct the moment upstream lands the
+  // dispatch, rather than the API being absent entirely.
+  refDistance: 13, maxDistance: 14, rolloffFactor: 15,
+  coneInnerAngle: 16, coneOuterAngle: 17, coneOuterGain: 18,
+  threshold: 19, knee: 20, ratio: 21, attack: 22, release: 23,
+  positionX: 24, positionY: 25, positionZ: 26,
+  orientationX: 27, orientationY: 28, orientationZ: 29,
 };
 
 const OSC_TYPE = { sine: 0, square: 1, sawtooth: 2, triangle: 3 };
@@ -141,7 +151,7 @@ export function installAudio(g) {
 
   class AudioBufferSourceNode extends AudioNode {
     constructor(ctx) {
-      super(ctx, host.createNode('buffersource'));
+      super(ctx, host.createNode('bufferSource'));
       this._buffer = null;
       this.loop = false;
       this.onended = null;
@@ -171,7 +181,7 @@ export function installAudio(g) {
 
   class BiquadFilterNode extends AudioNode {
     constructor(ctx) {
-      super(ctx, host.createNode('biquad'));
+      super(ctx, host.createNode('biquadFilter'));
       this.frequency = new AudioParam(ctx, this._id, PARAM.frequency, 350);
       this.Q = new AudioParam(ctx, this._id, PARAM.Q, 1);
       this.gain = new AudioParam(ctx, this._id, PARAM.gain, 0);
@@ -181,7 +191,7 @@ export function installAudio(g) {
 
   class StereoPannerNode extends AudioNode {
     constructor(ctx) {
-      super(ctx, host.createNode('stereopanner'));
+      super(ctx, host.createNode('stereoPanner'));
       this.pan = new AudioParam(ctx, this._id, PARAM.pan, 0);
     }
   }
@@ -211,6 +221,121 @@ export function installAudio(g) {
     getFloatTimeDomainData() { this.getByteFrequencyData(); }
   }
 
+  class WaveShaperNode extends AudioNode {
+    constructor(ctx) {
+      super(ctx, host.createNode('waveShaper'));
+      this._curve = null;
+      this._oversample = 'none';
+    }
+    get curve() { return this._curve; }
+    set curve(v) {
+      // The spec allows null (pass-through) or a Float32Array.
+      this._curve = v;
+      host.setWaveShaperCurve(this._id, v instanceof Float32Array ? v
+        : (v ? Float32Array.from(v) : null));
+    }
+    get oversample() { return this._oversample; }
+    set oversample(v) {
+      this._oversample = v;
+      host.setWaveShaperOversample(this._id, String(v));
+    }
+  }
+
+  class ConvolverNode extends AudioNode {
+    constructor(ctx) {
+      super(ctx, host.createNode('convolver'));
+      this._buffer = null;
+      this.normalize = true;
+    }
+    get buffer() { return this._buffer; }
+    set buffer(b) {
+      this._buffer = b;
+      if (!b) return;
+      // Same registration path AudioBufferSourceNode uses: an impulse response
+      // is uploaded exactly like sample data, and _bufferId caches it so
+      // assigning the same buffer to several nodes uploads once.
+      if (b._bufferId < 0) {
+        b._bufferId = host.registerBuffer(b._data, b.numberOfChannels, b.sampleRate);
+      }
+      host.setNodeBuffer(this._id, b._bufferId);
+    }
+  }
+
+  class DynamicsCompressorNode extends AudioNode {
+    constructor(ctx) {
+      super(ctx, host.createNode('dynamicsCompressor'));
+      this.threshold = new AudioParam(ctx, this._id, PARAM.threshold, -24);
+      this.knee = new AudioParam(ctx, this._id, PARAM.knee, 30);
+      this.ratio = new AudioParam(ctx, this._id, PARAM.ratio, 12);
+      this.attack = new AudioParam(ctx, this._id, PARAM.attack, 0.003);
+      this.release = new AudioParam(ctx, this._id, PARAM.release, 0.25);
+      this.reduction = 0;
+    }
+  }
+
+  class PannerNode extends AudioNode {
+    constructor(ctx) {
+      super(ctx, host.createNode('panner'));
+      this.positionX = new AudioParam(ctx, this._id, PARAM.positionX, 0);
+      this.positionY = new AudioParam(ctx, this._id, PARAM.positionY, 0);
+      this.positionZ = new AudioParam(ctx, this._id, PARAM.positionZ, 0);
+      this.orientationX = new AudioParam(ctx, this._id, PARAM.orientationX, 1);
+      this.orientationY = new AudioParam(ctx, this._id, PARAM.orientationY, 0);
+      this.orientationZ = new AudioParam(ctx, this._id, PARAM.orientationZ, 0);
+      this.refDistance = 1;
+      this.maxDistance = 10000;
+      this.rolloffFactor = 1;
+      this.coneInnerAngle = 360;
+      this.coneOuterAngle = 360;
+      this.coneOuterGain = 0;
+      this.panningModel = 'equalpower';
+      this.distanceModel = 'inverse';
+    }
+    // Deprecated in the spec but still what most game code calls.
+    setPosition(x, y, z) {
+      this.positionX.value = x; this.positionY.value = y; this.positionZ.value = z;
+    }
+    setOrientation(x, y, z) {
+      this.orientationX.value = x; this.orientationY.value = y; this.orientationZ.value = z;
+    }
+  }
+
+  class ConstantSourceNode extends AudioNode {
+    constructor(ctx) {
+      super(ctx, host.createNode('constantSource'));
+      this.offset = new AudioParam(ctx, this._id, PARAM.offset, 1);
+      this.onended = null;
+    }
+    start(when = 0) { host.startNode(this._id, when); }
+    stop(when = 0) { host.stopNode(this._id, when); }
+  }
+
+  class ChannelSplitterNode extends AudioNode {
+    constructor(ctx, numberOfOutputs = 6) {
+      super(ctx, host.createNode('channelSplitter'));
+      this.numberOfOutputs = numberOfOutputs;
+    }
+  }
+
+  class ChannelMergerNode extends AudioNode {
+    constructor(ctx, numberOfInputs = 6) {
+      super(ctx, host.createNode('channelMerger'));
+      this.numberOfInputs = numberOfInputs;
+    }
+  }
+
+  class IIRFilterNode extends AudioNode {
+    constructor(ctx, feedforward, feedback) {
+      super(ctx, host.createNode('IIRFilter'));
+      // Coefficients are constructor-only in the spec; there is no setter.
+      const ff = feedforward instanceof Float32Array
+        ? feedforward : Float32Array.from(feedforward || [1]);
+      const fb = feedback instanceof Float32Array
+        ? feedback : Float32Array.from(feedback || [1]);
+      host.setIIRCoefficients(this._id, ff, fb);
+    }
+  }
+
   class AudioDestinationNode extends AudioNode {
     constructor(ctx) {
       super(ctx, 0);              // node 0 is the engine's destination
@@ -234,6 +359,14 @@ export function installAudio(g) {
     createStereoPanner() { return new StereoPannerNode(this); }
     createDelay() { return new DelayNode(this); }
     createAnalyser() { return new AnalyserNode(this); }
+    createWaveShaper() { return new WaveShaperNode(this); }
+    createConvolver() { return new ConvolverNode(this); }
+    createDynamicsCompressor() { return new DynamicsCompressorNode(this); }
+    createPanner() { return new PannerNode(this); }
+    createConstantSource() { return new ConstantSourceNode(this); }
+    createChannelSplitter(n = 6) { return new ChannelSplitterNode(this, n); }
+    createChannelMerger(n = 6) { return new ChannelMergerNode(this, n); }
+    createIIRFilter(ff, fb) { return new IIRFilterNode(this, ff, fb); }
 
     createBuffer(channels, length, sampleRate) {
       return new AudioBuffer({
