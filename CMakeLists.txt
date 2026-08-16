@@ -276,3 +276,25 @@ foreach(cfg ${CMAKE_CONFIGURATION_TYPES} Release Debug RelWithDebInfo MinSizeRel
   set_target_properties(jsglq PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY_${cfg_upper} ${CMAKE_SOURCE_DIR}/build)
 endforeach()
+
+if(WIN32)
+  # Windows has no rpath: a DLL is found next to the executable or not at all.
+  # vcpkg's SDL2 is a shared library and ANGLE is always shared, so without this
+  # the binary builds and links and then fails to start with no diagnostic beyond
+  # an exit code. Copy them beside the exe as part of the build so a developer
+  # and CI both get something that actually runs.
+  set(ANGLE_LIB_DIR ${NATIVE_GLES_DIR}/../angle/lib)
+  file(GLOB ANGLE_DLLS ${ANGLE_LIB_DIR}/*.dll)
+  foreach(dll ${ANGLE_DLLS})
+    add_custom_command(TARGET jsglq POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+              ${dll} ${CMAKE_SOURCE_DIR}/build)
+  endforeach()
+  # SDL2::SDL2 knows where its own DLL is; ask the target rather than guessing a
+  # vcpkg path that changes with the triplet.
+  if(TARGET SDL2::SDL2)
+    add_custom_command(TARGET jsglq POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+              $<TARGET_FILE:SDL2::SDL2> ${CMAKE_SOURCE_DIR}/build)
+  endif()
+endif()

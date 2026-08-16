@@ -127,11 +127,16 @@ jobs:
         shell: bash
         run: |
           set -eu
-          # Check both names rather than branching on the platform string: it is
-          # `win32` here, not `windows`, and getting that wrong looked for a
-          # Linux-named binary on Windows and failed with a bare exit 127.
+          # Probe for the binary rather than branching on the platform string
+          # (it is `win32` here, not `windows`, and getting that wrong looked for
+          # a Linux-named binary and died with a bare exit 127).
+          #
+          # .exe FIRST and deliberately: Git-Bash's `[ -f build/jsglq ]` returns
+          # true when only build/jsglq.exe exists, but `./build/jsglq` then cannot
+          # actually be executed — which is the *second* way this step produced a
+          # bare 127.
           BIN=""
-          for c in build/jsglq build/jsglq.exe build/Release/jsglq build/Release/jsglq.exe; do
+          for c in build/jsglq.exe build/Release/jsglq.exe build/jsglq build/Release/jsglq; do
             if [ -f "$c" ]; then BIN="$c"; break; fi
           done
           if [ -z "$BIN" ]; then
@@ -153,7 +158,7 @@ jobs:
           # Copy the binary by name, from whichever layout the generator produced.
           # A glob with a `||` fallback can half-succeed and package nothing.
           BIN=""
-          for c in build/jsglq build/jsglq.exe build/Release/jsglq build/Release/jsglq.exe; do
+          for c in build/jsglq.exe build/Release/jsglq.exe build/jsglq build/Release/jsglq; do
             if [ -f "$c" ]; then BIN="$c"; break; fi
           done
           if [ -z "$BIN" ]; then echo "no binary to package"; ls -R build | head -40; exit 1; fi
@@ -164,16 +169,22 @@ jobs:
           # copy here ships an archive that cannot render, so this asserts rather
           # than falling through to a silent `|| true`.
           if [ "${{ matrix.platform }}" != "linux" ]; then
-            ANGLE=../native-gles/angle/lib
             n=0
-            for f in "$ANGLE"/*.dylib "$ANGLE"/*.dll; do
+            # Windows: the build already copied every required DLL (ANGLE + SDL2)
+            # next to the exe, because Windows has no rpath and resolves them from
+            # that directory. Take them from there so the archive matches what was
+            # actually tested. macOS resolves via @loader_path, so the dylibs come
+            # straight from the ANGLE download.
+            for f in build/*.dll ../native-gles/angle/lib/*.dylib; do
               [ -f "$f" ] || continue
               cp "$f" "dist/$OUT/"; n=$((n+1))
             done
             if [ "$n" -eq 0 ]; then
-              echo "no ANGLE runtime libraries found in $ANGLE"; ls -la "$ANGLE" || true; exit 1
+              echo "no GL runtime libraries found to bundle"
+              ls -la build ../native-gles/angle/lib || true
+              exit 1
             fi
-            echo "bundled $n ANGLE libraries"
+            echo "bundled $n runtime libraries"
           fi
           cp -r runtime "dist/$OUT/runtime"
           cp -r examples "dist/$OUT/examples"
