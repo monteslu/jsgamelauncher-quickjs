@@ -3,6 +3,9 @@ name: build
 on:
   push:
     branches: [main]
+    # Tags must trigger the workflow too, or the release job can never run: it is
+    # gated on refs/tags/v* but would never be reached.
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
