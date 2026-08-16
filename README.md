@@ -105,7 +105,8 @@ builds and ships:
 | windows-x64, windows-arm64 | ANGLE (D3D11) | built in CI; ANGLE ships beside the binary |
 
 Platform-specific code is confined to `src/platform.c` — executable path, path
-splitting, mkdir, realpath, temp dir. Everything else is portable C/C++.
+splitting, mkdir, realpath, temp dir, and the monotonic clock and sleep that
+frame pacing runs on. Everything else is portable C/C++.
 
 macOS and Windows have no system GLES, so ANGLE is fetched with native-gles's own
 `download-angle` script rather than a second, divergent copy. CI runners have no
