@@ -1,0 +1,6 @@
+{
+  "name": "bench-s02-entities-5000",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "main.js"
+}

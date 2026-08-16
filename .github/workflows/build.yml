@@ -1,0 +1,153 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x64,    os: ubuntu-22.04 }
+          - { name: linux-arm64,  os: ubuntu-22.04-arm }
+          - { name: macos-arm64,  os: macos-15 }
+          - { name: macos-x64,    os: macos-15-intel }
+          - { name: windows-x64,  os: windows-2022 }
+          - { name: windows-arm64, os: windows-11-arm }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # native-gles and webaudio-node are consumed as SOURCE, compiled here with
+      # zero edits. They sit beside this repo in a normal checkout, so CI puts
+      # them where the CMake build expects them.
+      - name: checkout native-gles
+        uses: actions/checkout@v4
+        with:
+          repository: monteslu/native-gles
+          path: ../native-gles
+      - name: checkout webaudio-node
+        uses: actions/checkout@v4
+        with:
+          repository: monteslu/webaudio-node
+          path: ../webaudio-node
+
+      - name: deps (linux)
+        if: startsWith(matrix.name, 'linux')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libsdl2-dev libegl-dev libgles-dev
+
+      - name: deps (macos)
+        if: startsWith(matrix.name, 'macos')
+        run: brew install cmake ninja sdl2
+
+      - name: deps (windows)
+        if: startsWith(matrix.name, 'windows')
+        run: |
+          vcpkg install sdl2:x64-windows
+          echo "CMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" >> $env:GITHUB_ENV
+
+      - name: fetch quickjs
+        run: node scripts/fetch-deps.mjs
+
+      - name: build
+        run: |
+          cmake -S . -B build-cmake -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-cmake --config Release -j
+
+      # A build that produces a binary which cannot boot is not a passing build.
+      # This runs a real game headless and requires actual drawn pixels, because a
+      # blank frame is a failure that a zero exit code will happily report as success.
+      - name: smoke test
+        if: startsWith(matrix.name, 'linux')
+        run: |
+          sudo apt-get install -y xvfb mesa-utils
+          xvfb-run -a node test/smoke.mjs
+
+      - name: size budget
+        shell: bash
+        run: node scripts/size-budget.mjs
+
+      - name: package
+        shell: bash
+        run: |
+          set -eu
+          OUT="jsglq-${{ matrix.name }}"
+          mkdir -p "dist/$OUT"
+          cp build/jsglq* "dist/$OUT/" 2>/dev/null || cp build/Release/jsglq* "dist/$OUT/"
+          cp -r runtime "dist/$OUT/runtime"
+          cp -r examples "dist/$OUT/examples"
+          cp README.md LICENSE THIRD-PARTY.md "dist/$OUT/"
+          # A downloaded binary should be runnable without reading anything first.
+          cat > "dist/$OUT/RUN-ME.txt" <<'TXT'
+          jsgamelauncher-quickjs
+
+          Try an example:
+              ./jsglq examples/hello-canvas
+              ./jsglq examples/hello-3d
+
+          Run your own game:
+              ./jsglq /path/to/your-game
+
+          Ship your game as ONE file:
+              node scripts/fuse.mjs /path/to/your-game my-game
+
+          Options:      ./jsglq --help
+          Licensing:    ./jsglq --licenses   (commercial use is fine; see THIRD-PARTY.md)
+          TXT
+          echo "packaged $OUT"
+
+      - name: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: jsglq-${{ matrix.name }}
+          path: dist/jsglq-${{ matrix.name }}
+
+  release:
+    name: publish release binaries
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts }
+      - name: archive each platform
+        run: |
+          set -eu
+          cd artifacts
+          for d in */; do
+            name="${d%/}"
+            chmod +x "$name"/jsglq 2>/dev/null || true
+            tar czf "../$name.tar.gz" "$name"
+          done
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: "*.tar.gz"
+          generate_release_notes: true
+
+  test:
+    name: regression + harness self-test
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { repository: monteslu/native-gles, path: ../native-gles }
+      - uses: actions/checkout@v4
+        with: { repository: monteslu/webaudio-node, path: ../webaudio-node }
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libsdl2-dev libegl-dev libgles-dev xvfb
+      - run: node scripts/fetch-deps.mjs
+      - run: cmake -S . -B build-cmake -DCMAKE_BUILD_TYPE=Release && cmake --build build-cmake -j
+      # The must-fail controls run here too: if one ever passes, the harness is
+      # broken and every number it has produced is void.
+      - run: xvfb-run -a node test/regression/run.mjs

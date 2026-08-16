@@ -1,0 +1,6 @@
+{
+  "name": "bench-s07-three-heavy",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "main.js"
+}

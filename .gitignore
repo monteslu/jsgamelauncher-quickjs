@@ -1,0 +1,25 @@
+# Build output
+build/
+build-cmake/
+*.o
+*.a
+*.so
+
+# Vendored dependencies, fetched by scripts/fetch-deps.mjs against a pinned commit
+deps/quickjs/
+
+# Node
+node_modules/
+
+# Test and bench output
+.selftest/
+bench/results/
+test/parity/results/
+bench/scenes/*/bench-opts.json
+
+# Generated: regenerate with scripts/gen-gl-table.mjs
+src/gl_table.inc
+
+# Editor / OS
+.DS_Store
+*.swp

@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>bench: s03-canvas2d-storm</title>
+<style>
+  /* No scaling, no smoothing, no device-pixel-ratio games: the canvas backing store
+     must be exactly width x height so captures are comparable to the launchers. */
+  html, body { margin: 0; padding: 0; background: #0d1014; overflow: hidden; }
+  canvas { display: block; image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<canvas id="game-canvas" width="960" height="540"></canvas>
+<script type="module">
+  const p = new URLSearchParams(location.search);
+  const c = document.getElementById('game-canvas');
+  c.width = Number(p.get('width') || 960);
+  c.height = Number(p.get('height') || 540);
+  import('./main.js').catch((e) => {
+    document.title = 'ERROR';
+    window.__benchResult = { error: String(e && e.stack || e) };
+    console.error(e);
+  });
+</script>
+</body>
+</html>

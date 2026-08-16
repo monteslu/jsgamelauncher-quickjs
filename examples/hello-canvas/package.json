@@ -1,0 +1,7 @@
+{
+  "name": "hello-canvas",
+  "version": "1.0.0",
+  "description": "Smallest complete game: Canvas 2D, keyboard, gamepad, pointer",
+  "type": "module",
+  "main": "main.js"
+}

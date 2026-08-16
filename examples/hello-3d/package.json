@@ -1,0 +1,7 @@
+{
+  "name": "hello-3d",
+  "version": "1.0.0",
+  "description": "WebGL2 without a library: a spinning shaded cube",
+  "type": "module",
+  "main": "main.js"
+}

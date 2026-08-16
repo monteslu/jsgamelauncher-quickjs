@@ -1,0 +1,6 @@
+{
+  "name": "bench-s09-gc-churn",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "main.js"
+}

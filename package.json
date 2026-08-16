@@ -1,0 +1,18 @@
+{
+  "name": "jsgamelauncher-quickjs",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "QuickJS-based game launcher: browser APIs without a browser or Node",
+  "scripts": {
+    "bench:gen": "node bench/scripts/gen-html.mjs",
+    "bench:browser": "node bench/run.mjs --runtime=browser",
+    "bench:node": "node bench/run.mjs --runtime=node",
+    "bench:qjs": "node bench/run.mjs --runtime=qjs",
+    "differ:selftest": "node bench/differ.mjs selftest",
+    "test:harness": "node bench/selftest.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
+  }
+}

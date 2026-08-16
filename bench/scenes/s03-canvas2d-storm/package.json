@@ -1,0 +1,6 @@
+{
+  "name": "bench-s03-canvas2d-storm",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "main.js"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "bench-s05-three-basic",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "main.js"
+}

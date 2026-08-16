@@ -1,0 +1,6 @@
+{
+  "name": "bench-s10-typedarray",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "main.js"
+}

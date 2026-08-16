@@ -1,0 +1,25 @@
+{
+  "_comment": "Exact pins for every vendored dependency. Downstream builds fetch these from releases; nothing is built from a floating ref. Bump deliberately, never implicitly.",
+  "quickjs": {
+    "repo": "https://github.com/quickjs-ng/quickjs.git",
+    "tag": "v0.16.1",
+    "commit": "954dc53628e36891f93c359aa60895c2ae3dac6b",
+    "why": "quickjs-ng over bellard: first-class MSVC/CMake (needed for win-x64), test262 on every PR, and the ecosystem we lean on (txiki, rquickjs) is already here."
+  },
+  "nativeGles": {
+    "path": "../native-gles",
+    "version": "0.6.1",
+    "why": "egl_context.cpp is engine-agnostic C++ with zero Napi; gl_bindings.cpp needs only a thin shim."
+  },
+  "three": {
+    "revision": "183",
+    "vendoredFrom": "wasmcart-jsgame/examples/threejs",
+    "why": "bench scenes only; not shipped in the runtime."
+  },
+  "sdl": {
+    "system": true,
+    "minVersion": "2.0.10",
+    "testedWith": "2.32.10",
+    "why": "SDL2 not SDL3: every measured code path in the research used SDL2, and kmamal never shipped SDL3."
+  }
+}

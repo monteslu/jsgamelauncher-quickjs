@@ -1,0 +1,6 @@
+{
+  "name": "bench-s04-sprites",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "main.js"
+}
