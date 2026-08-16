@@ -261,9 +261,16 @@ add_dependencies(jsglq gl_table)
 
 if(APPLE)
   # ANGLE ships beside the executable, so look there first at load time.
+  #
+  # BUILD_WITH_INSTALL_RPATH stops CMake appending every link directory as an
+  # rpath. Those absolute paths (Homebrew's prefix, and the CI runner's own
+  # working directory) end up baked into the shipped binary, which both leaks
+  # the build machine's layout and makes the binary depend on it.
   set_target_properties(jsglq PROPERTIES
     BUILD_RPATH "@loader_path"
-    INSTALL_RPATH "@loader_path")
+    INSTALL_RPATH "@loader_path"
+    BUILD_WITH_INSTALL_RPATH TRUE
+    MACOSX_RPATH TRUE)
 endif()
 
 # The binary always lands in build/, on every generator. Multi-config generators
@@ -301,4 +308,19 @@ if(WIN32)
                 $<TARGET_FILE:SDL2::SDL2> ${CMAKE_SOURCE_DIR}/build)
     endif()
   endif()
+endif()
+
+if(APPLE)
+  # Same idea as the Windows block: put ANGLE beside the binary at build time so
+  # build/ holds everything the binary needs. Packaging then copies from build/,
+  # which is the directory the binary was actually tested in. SDL2 is handled
+  # separately by scripts/bundle-macos-libs.mjs, which must also rewrite its
+  # install name (Homebrew bakes in an absolute path).
+  set(ANGLE_LIB_DIR ${NATIVE_GLES_DIR}/../angle/lib)
+  file(GLOB ANGLE_DYLIBS ${ANGLE_LIB_DIR}/*.dylib)
+  foreach(dylib ${ANGLE_DYLIBS})
+    add_custom_command(TARGET jsglq POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+              ${dylib} ${CMAKE_SOURCE_DIR}/build)
+  endforeach()
 endif()

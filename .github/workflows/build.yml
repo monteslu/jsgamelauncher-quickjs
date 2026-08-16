@@ -106,6 +106,15 @@ jobs:
           cmake -S . -B build-cmake -DCMAKE_BUILD_TYPE=Release $EXTRA
           cmake --build build-cmake --config Release -j
 
+      # macOS links SDL2 by the ABSOLUTE path Homebrew bakes into it, so the
+      # binary only runs on a machine with Homebrew's SDL2 at that exact path.
+      # This copies every non-system dependency beside the binary, rewrites the
+      # references to @rpath, and strips rpaths that point at the build machine.
+      - name: bundle macOS libraries
+        if: matrix.platform == 'darwin'
+        shell: bash
+        run: node scripts/bundle-macos-libs.mjs build/jsglq
+
       # A build that produces a binary which cannot boot is not a passing build.
       # This runs a real game headless and requires actual drawn pixels, because a
       # blank frame is a failure that a zero exit code will happily report as success.
@@ -170,18 +179,20 @@ jobs:
           # than falling through to a silent `|| true`.
           if [ "${{ matrix.platform }}" != "linux" ]; then
             n=0
-            # Windows: the build already copied every required DLL (ANGLE + SDL2)
-            # next to the exe, because Windows has no rpath and resolves them from
-            # that directory. Take them from there so the archive matches what was
-            # actually tested. macOS resolves via @loader_path, so the dylibs come
-            # straight from the ANGLE download.
-            for f in build/*.dll ../native-gles/angle/lib/*.dylib; do
+            # Take the libraries from build/ on BOTH platforms, because build/ is
+            # where the binary was linked and tested against them: Windows gets
+            # its DLLs there from a CMake POST_BUILD copy, macOS gets its dylibs
+            # there from bundle-macos-libs.mjs (which also rewrites the install
+            # names). Copying macOS dylibs from the ANGLE download instead would
+            # miss libSDL2 entirely — that is precisely how 0.1.0 shipped a macOS
+            # archive that could not start.
+            for f in build/*.dll build/*.dylib; do
               [ -f "$f" ] || continue
               cp "$f" "dist/$OUT/"; n=$((n+1))
             done
             if [ "$n" -eq 0 ]; then
               echo "no GL runtime libraries found to bundle"
-              ls -la build ../native-gles/angle/lib || true
+              ls -la build || true
               exit 1
             fi
             echo "bundled $n runtime libraries"
@@ -207,6 +218,46 @@ jobs:
           Licensing:    ./jsglq --licenses   (commercial use is fine; see THIRD-PARTY.md)
           TXT
           echo "packaged $OUT"
+
+      # THE test that matters: run the PACKAGED artifact, from a directory that
+      # is not the build tree, and make it open a real GL context.
+      #
+      # 0.1.0 shipped a macOS archive that died in the dynamic loader on every
+      # machine except the build runner. CI was green because the smoke test ran
+      # the binary INSIDE the build tree (where Homebrew's SDL2 exists) and only
+      # asked it to print --version (which returns before any library is used).
+      # Testing the build tree says nothing about what got packaged.
+      - name: verify the packaged artifact
+        shell: bash
+        run: |
+          set -eu
+          OUT="jsglq-${{ matrix.name }}"
+          cd "dist/$OUT"
+          EXE=./jsglq; [ -f ./jsglq.exe ] && EXE=./jsglq.exe || true
+          "$EXE" --version
+
+          # --check opens a real headless GL context. Linux runners have no GPU,
+          # so point it at the software rasterizer; macOS/Windows runners have no
+          # display at all, where ANGLE cannot make a context — there, prove
+          # self-containment by inspecting the binary instead of running it.
+          if [ "${{ matrix.platform }}" = "linux" ]; then
+            LIBGL_ALWAYS_SOFTWARE=1 EGL_PLATFORM=surfaceless xvfb-run -a "$EXE" --check
+          elif [ "${{ matrix.platform }}" = "darwin" ]; then
+            # Every non-system dependency must be @rpath-relative, and no rpath
+            # may point outside the bundle. An absolute /opt/homebrew path here
+            # is exactly the 0.1.0 defect.
+            otool -L jsglq | tail -n +2 | awk '{print $1}' > /tmp/deps.txt
+            if grep -vE '^(/usr/lib/|/System/|@rpath/|@loader_path/|@executable_path/)' /tmp/deps.txt; then
+              echo "FAIL: the above dependencies are absolute paths off this machine"
+              exit 1
+            fi
+            otool -l jsglq | awk '/LC_RPATH/{f=1} f&&/path /{print $2; f=0}' > /tmp/rpaths.txt
+            if grep -vE '^@(loader_path|executable_path)' /tmp/rpaths.txt; then
+              echo "FAIL: the above rpaths point outside the bundle"
+              exit 1
+            fi
+            echo "macOS bundle is self-contained"
+          fi
 
       - name: upload
         uses: actions/upload-artifact@v4

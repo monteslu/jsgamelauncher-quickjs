@@ -62,6 +62,42 @@ typedef struct {
 
 #define JSGLQ_VERSION "0.1.0"
 
+/*
+ * Prove the binary can actually START.
+ *
+ * --version prints compiled-in strings and touches nothing, so it passes on a
+ * build whose SDL2 or ANGLE cannot be loaded at all. That is not hypothetical:
+ * the 0.1.0 macOS archive shipped linked against a Homebrew absolute path and
+ * died in the dynamic loader on every machine but the build runner, while CI
+ * reported the binary "verified to load and report itself".
+ *
+ * This opens a real headless window and GL context, which forces the loader to
+ * resolve every dependency and the driver to hand back a live context.
+ */
+static int run_self_check(void)
+{
+    if (jsglq_window_open(64, 64, "jsglq --check", /*headless=*/true,
+                          /*fullscreen=*/false) != 0) {
+        fprintf(stderr, "jsglq: self-check FAILED: could not create a GL context\n");
+        return 1;
+    }
+    if (!jsglq_window_make_current()) {
+        fprintf(stderr, "jsglq: self-check FAILED: could not make the context current\n");
+        jsglq_window_close();
+        return 1;
+    }
+    int w = 0, h = 0;
+    jsglq_window_size(&w, &h);
+    jsglq_window_close();
+
+    if (w <= 0 || h <= 0) {
+        fprintf(stderr, "jsglq: self-check FAILED: context reported %dx%d\n", w, h);
+        return 1;
+    }
+    printf("jsglq: self-check OK (headless GL context %dx%d)\n", w, h);
+    return 0;
+}
+
 static void print_version(void)
 {
     printf("jsgamelauncher-quickjs %s\n", JSGLQ_VERSION);
@@ -135,6 +171,7 @@ static void usage(void)
         "OTHER\n"
         "  --quiet                suppress launcher chatter (game output still prints)\n"
         "  --version              print version and component details\n"
+        "  --check                verify the binary can open a GL context and exit\n"
         "  --licenses             print embedded components and their licenses\n"
         "  --help                 this text\n"
         "\n"
@@ -239,6 +276,7 @@ int main(int argc, char **argv)
         else if (!strncmp(a, "--title=", 8))   opt.title = a + 8;
         else if (!strcmp(a, "--version") || !strcmp(a, "-v")) { print_version(); return 0; }
         else if (!strcmp(a, "--licenses"))     { print_licenses(); return 0; }
+        else if (!strcmp(a, "--check"))        return run_self_check();
         else if (!strncmp(a, "--frames=", 9))  opt.max_frames = strtoull(a + 9, NULL, 10);
         else if (!strncmp(a, "--max-seconds=", 14)) opt.max_seconds = atof(a + 14);
         else if (!strcmp(a, "--help") || !strcmp(a, "-h")) { usage(); return 0; }
