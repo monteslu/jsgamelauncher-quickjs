@@ -65,10 +65,43 @@ jobs:
           sudo apt-get install -y cmake ninja-build libsdl2-dev libegl-dev \
                                   libgles-dev libgl1-mesa-dri xvfb
 
+      # Build REAL SDL2 from source rather than `brew install sdl2`.
+      #
+      # Homebrew's sdl2 formula is now sdl2-compat: a shim that dlopen()s SDL3 at
+      # runtime. Two things make it unshippable here. It cannot be bundled by
+      # static analysis, because the SDL3 dependency is a dlopen and never appears
+      # in LC_LOAD_DYLIB — so a dependency walk reports "self-contained" while the
+      # real dependency is missing. And when it fails to find SDL3 its dllinit
+      # raises a MODAL NSAlert, which on a headless machine hangs forever and on a
+      # user's Mac is a dialog box instead of an error.
       - name: deps (macos)
         if: matrix.platform == 'darwin'
         working-directory: .
-        run: brew install cmake ninja sdl2
+        run: brew install cmake ninja
+
+      - name: build SDL2 from source (macos)
+        if: matrix.platform == 'darwin'
+        working-directory: .
+        run: |
+          set -eu
+          curl -fsSL -o SDL2.tar.gz \
+            https://github.com/libsdl-org/SDL/releases/download/release-2.32.4/SDL2-2.32.4.tar.gz
+          tar xzf SDL2.tar.gz
+          cmake -S SDL2-2.32.4 -B sdl2-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$PWD/sdl2-prefix" \
+            -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST=OFF
+          cmake --build sdl2-build
+          cmake --install sdl2-build
+          echo "SDL2_DIR=$PWD/sdl2-prefix/lib/cmake/SDL2" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=$PWD/sdl2-prefix" >> $GITHUB_ENV
+          # Prove we got real SDL2, not the compat shim: sdl2-compat exports
+          # dllinit/error_dialog, which is what raised the modal dialog.
+          if nm -gU "$PWD/sdl2-prefix/lib/libSDL2-2.0.0.dylib" | grep -q "error_dialog"; then
+            echo "FAIL: built library still looks like sdl2-compat"
+            exit 1
+          fi
+          echo "real SDL2 built at $PWD/sdl2-prefix"
 
       - name: deps (windows)
         if: matrix.platform == 'win32'

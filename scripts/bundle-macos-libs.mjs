@@ -154,6 +154,25 @@ for (const f of signOrder) {
 
 console.log(`macOS bundle: ${copied} libraries copied, ${rewritten} references rewritten, ${signOrder.length} signed and verified`);
 
+/* A dependency walk can only see LC_LOAD_DYLIB entries. A library that dlopen()s
+   its real implementation at runtime passes this whole script and still fails to
+   start — sdl2-compat is exactly that: it shims to SDL3 via dlopen, and when it
+   cannot find it, its initializer raises a MODAL dialog, which hangs headless
+   machines forever. Static analysis reported "self-contained" while the actual
+   dependency was missing entirely, so check for the shim by name. */
+for (const name of bundled) {
+  if (!/^libSDL2/.test(name)) continue;
+  const sym = run('nm', ['-gU', join(destDir, name)]);
+  if (/error_dialog|SDL3/.test(sym)) {
+    console.error(
+      `  ${name} looks like sdl2-compat (a dlopen shim over SDL3), not real SDL2.\n` +
+        '  It cannot be bundled by dependency walking and raises a modal dialog\n' +
+        '  when its backing library is absent. Link against real SDL2 instead.',
+    );
+    process.exit(1);
+  }
+}
+
 /* Refuse to report success if anything absolute survived. */
 const { deps: finalDeps, rpaths: finalRpaths } = loadCommands(bin);
 const bad = finalDeps.filter((d) => !isSystem(d) && !isRelocated(d));
