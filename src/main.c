@@ -60,7 +60,7 @@ typedef struct {
     double max_seconds;   /* hard wall-clock cap; 0 = unlimited */
 } Options;
 
-#define JSGLQ_VERSION "0.1.0"
+#define JSGLQ_VERSION "0.1.1"
 
 /*
  * Prove the binary can actually START.

@@ -124,8 +124,22 @@ repo — both are compiled from source, unmodified.
 node scripts/fetch-deps.mjs      # quickjs-ng, at a verified pinned commit
 cmake -S . -B build-cmake -DCMAKE_BUILD_TYPE=Release
 cmake --build build-cmake -j8
+./build/jsglq --check            # opens a real GL context; proves the build runs
 ./build/jsglq examples/hello-canvas
 ```
+
+**On macOS, use real SDL2 rather than `brew install sdl2`.** That formula now
+installs *sdl2-compat*, a shim that `dlopen`s SDL3 at runtime. It cannot be
+bundled into a redistributable app (the SDL3 dependency never appears in
+`LC_LOAD_DYLIB`, so dependency walking cannot find it), and when it fails to
+locate SDL3 it raises a **modal dialog from a static initializer** — which on a
+headless machine hangs forever. Build SDL2 2.32.x from source instead; CI does
+exactly that, and `scripts/bundle-macos-libs.mjs` refuses to package the shim.
+
+To make a macOS build redistributable, run that script: it copies every
+non-system dependency beside the binary, rewrites install names to `@rpath`,
+strips rpaths pointing outside the bundle, re-signs (dependencies first, the
+executable last), and fails if anything absolute or missing survives.
 
 ## Shipping a game
 
