@@ -127,11 +127,12 @@ jobs:
         shell: bash
         run: |
           set -eu
-          EXE=jsglq; [ "${{ matrix.platform }}" = "windows" ] && EXE=jsglq.exe
-          # Multi-config generators may still place it under a config subdir.
+          # Check both names rather than branching on the platform string: it is
+          # `win32` here, not `windows`, and getting that wrong looked for a
+          # Linux-named binary on Windows and failed with a bare exit 127.
           BIN=""
-          for c in "build/$EXE" "build/Release/$EXE"; do
-            [ -f "$c" ] && BIN="$c" && break
+          for c in build/jsglq build/jsglq.exe build/Release/jsglq build/Release/jsglq.exe; do
+            if [ -f "$c" ]; then BIN="$c"; break; fi
           done
           if [ -z "$BIN" ]; then
             echo "no binary found; build/ contains:"; ls -R build | head -40; exit 1
@@ -149,7 +150,14 @@ jobs:
           set -eu
           OUT="jsglq-${{ matrix.name }}"
           mkdir -p "dist/$OUT"
-          cp build/jsglq* "dist/$OUT/" 2>/dev/null || cp build/Release/jsglq* "dist/$OUT/"
+          # Copy the binary by name, from whichever layout the generator produced.
+          # A glob with a `||` fallback can half-succeed and package nothing.
+          BIN=""
+          for c in build/jsglq build/jsglq.exe build/Release/jsglq build/Release/jsglq.exe; do
+            if [ -f "$c" ]; then BIN="$c"; break; fi
+          done
+          if [ -z "$BIN" ]; then echo "no binary to package"; ls -R build | head -40; exit 1; fi
+          cp "$BIN" "dist/$OUT/"
           # ANGLE travels with the binary on macOS/Windows: without libEGL/libGLESv2
           # beside it the launcher cannot create a GL context at all. The downloader
           # puts BOTH dylibs and DLLs in angle/lib (not angle/bin), and a missing
@@ -211,12 +219,20 @@ jobs:
           cd artifacts
           for d in */; do
             name="${d%/}"
-            chmod +x "$name"/jsglq 2>/dev/null || true
-            tar czf "../$name.tar.gz" "$name"
+            # Windows gets a .zip (what the platform expects and can open with no
+            # extra tooling); everyone else gets a .tar.gz, which preserves the
+            # executable bit that a zip would drop.
+            case "$name" in
+              *windows*) zip -qr "../$name.zip" "$name" ;;
+              *) chmod +x "$name"/jsglq; tar czf "../$name.tar.gz" "$name" ;;
+            esac
           done
+          ls -la ../*.tar.gz ../*.zip
       - uses: softprops/action-gh-release@v2
         with:
-          files: "*.tar.gz"
+          files: |
+            *.tar.gz
+            *.zip
           generate_release_notes: true
 
   test:
