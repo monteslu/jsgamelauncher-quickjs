@@ -18,6 +18,17 @@ if(MSVC)
   # some C constructs more strictly than clang/gcc. These keep the shared sources
   # compiling without sprinkling _CRT_ ifdefs through code that is otherwise
   # perfectly portable.
+  # CMAKE_MSVC_RUNTIME_LIBRARY is honoured only under policy CMP0091; without
+  # NEW it is silently ignored and the flag below does nothing at all.
+  cmake_policy(SET CMP0091 NEW)
+
+  # Link the C runtime statically. Otherwise the binary imports MSVCP140.dll and
+  # VCRUNTIME140*.dll, which are the Visual C++ redistributable — present on the
+  # build runner but NOT guaranteed on a clean Windows install, so a downloaded
+  # archive would fail to start with a missing-DLL dialog. This is the same
+  # "works on the build machine" trap that shipped a broken macOS 0.1.0.
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
   # _USE_MATH_DEFINES: the MSVC CRT hides M_PI and friends behind it. The audio
   # DSP sources use them freely, as every other toolchain defines them by default.
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE
