@@ -235,7 +235,9 @@ jobs:
           # a `command -v timeout` guard silently degrades to an unbounded run
           # there — which is exactly where the hang is. Use a portable watchdog.
           run_bounded() {
-            "$@" & local pid=$!
+            # < /dev/null: a backgrounded process that reads the terminal gets
+            # SIGTTIN and stops, which is indistinguishable from a hang.
+            "$@" < /dev/null & local pid=$!
             local n=0
             while kill -0 "$pid" 2>/dev/null; do
               n=$((n+1))
@@ -252,6 +254,14 @@ jobs:
             done
             wait "$pid"
           }
+          # Isolate WHERE it hangs. DYLD_PRINT_LIBRARIES shows each library as it
+          # loads, so a hang inside the dynamic loader stops at the culprit, while
+          # a hang after the last line is in a pre-main initializer or main itself.
+          if [ "${{ matrix.platform }}" = "darwin" ]; then
+            echo "--- dyld trace (bounded) ---"
+            DYLD_PRINT_LIBRARIES=1 run_bounded "$EXE" --version 2>&1 | tail -30 || true
+            echo "--- plain run ---"
+          fi
           run_bounded "$EXE" --version
 
           # --check opens a real headless GL context. Linux runners have no GPU,
