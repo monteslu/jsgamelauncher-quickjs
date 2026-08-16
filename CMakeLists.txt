@@ -291,10 +291,14 @@ if(WIN32)
               ${dll} ${CMAKE_SOURCE_DIR}/build)
   endforeach()
   # SDL2::SDL2 knows where its own DLL is; ask the target rather than guessing a
-  # vcpkg path that changes with the triplet.
+  # vcpkg path that changes with the triplet. Only shared builds have a runtime
+  # DLL to copy; a static SDL2 needs nothing here.
   if(TARGET SDL2::SDL2)
-    add_custom_command(TARGET jsglq POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different
-              $<TARGET_FILE:SDL2::SDL2> ${CMAKE_SOURCE_DIR}/build)
+    get_target_property(_sdl2_type SDL2::SDL2 TYPE)
+    if(_sdl2_type STREQUAL "SHARED_LIBRARY")
+      add_custom_command(TARGET jsglq POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:SDL2::SDL2> ${CMAKE_SOURCE_DIR}/build)
+    endif()
   endif()
 endif()
