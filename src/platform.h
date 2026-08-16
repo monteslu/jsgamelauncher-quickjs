@@ -55,6 +55,14 @@ void jsglq_temp_dir(char *out, size_t out_size);
    directory to the module loader). */
 void jsglq_setenv(const char *name, const char *value);
 
+/* Milliseconds from an unspecified monotonic origin. Monotonic matters: frame
+   pacing and setTimeout must not jump when the wall clock is adjusted. */
+double jsglq_monotonic_ms(void);
+
+/* Sleep for the given milliseconds. Sub-millisecond values are honoured where
+   the platform allows; a value <= 0 returns immediately. */
+void jsglq_sleep_ms(double ms);
+
 /* The platform's path separator, for building paths that the OS will accept. */
 #ifdef _WIN32
 #define JSGLQ_PATH_SEP '\\'

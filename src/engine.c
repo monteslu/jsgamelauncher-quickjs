@@ -60,9 +60,7 @@ static uint8_t *read_file_abs(const char *path, size_t *out_len)
 
 double jsglq_now_ms(void)
 {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1.0e6;
+    return jsglq_monotonic_ms();
 }
 
 /* ------------------------------------------------------------------ errors ---- */

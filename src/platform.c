@@ -7,10 +7,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <time.h>
+
 #ifdef _WIN32
   #include <windows.h>
   #include <direct.h>
   #include <io.h>
+  #include <mmsystem.h>   /* timeBeginPeriod */
 #else
   #include <unistd.h>
   #include <sys/stat.h>
@@ -205,5 +208,44 @@ void jsglq_setenv(const char *name, const char *value)
     _putenv(buf);
 #else
     setenv(name, value, 1);
+#endif
+}
+
+/* ------------------------------------------------------------------- clock --- */
+
+double jsglq_monotonic_ms(void)
+{
+#ifdef _WIN32
+    /* QueryPerformanceCounter rather than GetTickCount64: the latter is quantized
+       to the ~15ms scheduler tick, which is coarser than a frame. */
+    static LARGE_INTEGER freq;
+    LARGE_INTEGER now;
+    if (freq.QuadPart == 0) QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&now);
+    return (double)now.QuadPart * 1000.0 / (double)freq.QuadPart;
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1.0e6;
+#endif
+}
+
+void jsglq_sleep_ms(double ms)
+{
+    if (ms <= 0) return;
+#ifdef _WIN32
+    /* Sleep() honours only whole milliseconds and, by default, rounds up to the
+       scheduler tick. timeBeginPeriod(1) is what makes a 1ms request behave like
+       one; without it short frame-pacing sleeps overshoot badly. */
+    static int period_set = 0;
+    if (!period_set) { timeBeginPeriod(1); period_set = 1; }
+    DWORD whole = (DWORD)ms;
+    if (whole == 0) whole = 1;
+    Sleep(whole);
+#else
+    struct timespec ts;
+    ts.tv_sec = (time_t)(ms / 1000.0);
+    ts.tv_nsec = (long)((ms - (double)ts.tv_sec * 1000.0) * 1e6);
+    nanosleep(&ts, NULL);
 #endif
 }

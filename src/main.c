@@ -200,11 +200,7 @@ static bool resolve_entry(const char *game_path, char *dir_out, size_t dir_sz,
 
 static void sleep_ms(double ms)
 {
-    if (ms <= 0) return;
-    struct timespec ts;
-    ts.tv_sec = (time_t)(ms / 1000.0);
-    ts.tv_nsec = (long)((ms - (double)ts.tv_sec * 1000.0) * 1e6);
-    nanosleep(&ts, NULL);
+    jsglq_sleep_ms(ms);
 }
 
 /*

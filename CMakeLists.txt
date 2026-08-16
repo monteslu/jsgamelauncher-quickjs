@@ -242,8 +242,15 @@ target_link_libraries(jsglq PRIVATE
   nativegles quickjs
   $<$<BOOL:${HAVE_WEBAUDIO}>:webaudio>
   ${SDL2_LIBRARIES} ${EGL_LIBRARIES} ${GLES_LIBRARIES}
-  m dl pthread
 )
+if(WIN32)
+  # winmm supplies timeBeginPeriod, which platform.c needs to get sleeps finer
+  # than the default ~15ms scheduler tick. m/dl/pthread are POSIX and are folded
+  # into the CRT here.
+  target_link_libraries(jsglq PRIVATE winmm)
+else()
+  target_link_libraries(jsglq PRIVATE m dl pthread)
+endif()
 target_link_directories(jsglq PRIVATE ${SDL2_LIBRARY_DIRS})
 
 add_dependencies(jsglq gl_table)
