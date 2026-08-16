@@ -13,10 +13,19 @@ endif()
 set(CMAKE_C_FLAGS_RELEASE "-O2 -g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O2 -g")
 
-# Reproducible builds: without this, assert()/__FILE__ bake the builder's home
-# directory into the shipped binary (found in wasmcart-jsgame) and the output
-# differs machine to machine for no reason.
-add_compile_options(-ffile-prefix-map=${CMAKE_SOURCE_DIR}=.)
+if(MSVC)
+  # MSVC deprecates the POSIX names (strdup, _putenv...) and defaults to treating
+  # some C constructs more strictly than clang/gcc. These keep the shared sources
+  # compiling without sprinkling _CRT_ ifdefs through code that is otherwise
+  # perfectly portable.
+  add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE
+                          NOMINMAX WIN32_LEAN_AND_MEAN)
+  add_compile_options(/utf-8)
+else()
+  # Reproducible builds: without this, assert()/__FILE__ bake the builder's home
+  # directory into the shipped binary and the output differs machine to machine.
+  add_compile_options(-ffile-prefix-map=${CMAKE_SOURCE_DIR}=.)
+endif()
 
 # GLES comes from the system on Linux and from ANGLE on macOS/Windows, which is
 # exactly how native-gles resolves it — the same ANGLE binaries, downloaded by that
@@ -92,8 +101,15 @@ add_library(quickjs STATIC
 )
 target_include_directories(quickjs PUBLIC ${QUICKJS_DIR})
 target_compile_definitions(quickjs PRIVATE _GNU_SOURCE)
-target_compile_options(quickjs PRIVATE -Wno-unused-variable -Wno-unused-but-set-variable
-                                       -Wno-sign-compare -Wno-array-bounds)
+# Third-party sources: quiet the warnings we are not going to fix upstream.
+# MSVC rejects unknown /W arguments outright (D8021) rather than ignoring them,
+# so these are gcc/clang only.
+if(NOT MSVC)
+  target_compile_options(quickjs PRIVATE -Wno-unused-variable -Wno-unused-but-set-variable
+                                         -Wno-sign-compare -Wno-array-bounds)
+else()
+  target_compile_options(quickjs PRIVATE /wd4101 /wd4018 /wd4244 /wd4267)
+endif()
 
 # ------------------------------------------------------------------ native-gles
 # egl_context.cpp contains ZERO Napi and compiles verbatim.
@@ -127,7 +143,11 @@ target_include_directories(nativegles PUBLIC
   ${EGL_INCLUDE_DIRS}
   ${GLES_INCLUDE_DIRS}
 )
-target_compile_options(nativegles PRIVATE -Wno-unused-parameter)
+if(NOT MSVC)
+  target_compile_options(nativegles PRIVATE -Wno-unused-parameter)
+else()
+  target_compile_options(nativegles PRIVATE /wd4100 /wd4244 /wd4267)
+endif()
 
 # ----------------------------------------------------------------- webaudio-node
 # The C++ DSP engine (16 node types + mp3/wav/flac/vorbis/aac/opus decoders) is
@@ -155,8 +175,12 @@ if(EXISTS ${WEBAUDIO_DIR}/wasm/audio_graph_simple.cpp)
     # opus ships its headers in three places and audio_decoders.cpp includes them
     # by bare name; missing these is the documented "opus_multistream.h not found".
   )
-  target_compile_options(webaudio PRIVATE
-    -Wno-unused-variable -Wno-unused-function -Wno-sign-compare)
+  if(NOT MSVC)
+    target_compile_options(webaudio PRIVATE
+      -Wno-unused-variable -Wno-unused-function -Wno-sign-compare)
+  else()
+    target_compile_options(webaudio PRIVATE /wd4101 /wd4505 /wd4018 /wd4244 /wd4267)
+  endif()
   set(HAVE_WEBAUDIO ON)
 else()
   message(WARNING "webaudio-node not found at ${WEBAUDIO_DIR}; audio disabled")
