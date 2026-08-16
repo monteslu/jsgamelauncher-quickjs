@@ -128,31 +128,14 @@ jobs:
           EGL_PLATFORM: surfaceless
         run: xvfb-run -a node test/smoke.mjs
 
-      # macOS and Windows runners have no display, and ANGLE needs one for a real
-      # context. The binary is still verified to load and report itself, which
-      # catches a broken link or a missing ANGLE dylib.
-      - name: smoke test (macos/windows)
-        if: matrix.platform != 'linux'
-        shell: bash
-        run: |
-          set -eu
-          # Probe for the binary rather than branching on the platform string
-          # (it is `win32` here, not `windows`, and getting that wrong looked for
-          # a Linux-named binary and died with a bare exit 127).
-          #
-          # .exe FIRST and deliberately: Git-Bash's `[ -f build/jsglq ]` returns
-          # true when only build/jsglq.exe exists, but `./build/jsglq` then cannot
-          # actually be executed — which is the *second* way this step produced a
-          # bare 127.
-          BIN=""
-          for c in build/jsglq.exe build/Release/jsglq.exe build/jsglq build/Release/jsglq; do
-            if [ -f "$c" ]; then BIN="$c"; break; fi
-          done
-          if [ -z "$BIN" ]; then
-            echo "no binary found; build/ contains:"; ls -R build | head -40; exit 1
-          fi
-          echo "running $BIN --version"
-          "./$BIN" --version
+      # There is deliberately NO build-tree smoke test for macOS/Windows.
+      #
+      # It used to run `build/jsglq --version` here, and that check is what let a
+      # broken macOS 0.1.0 ship: inside the build tree Homebrew's SDL2 is present,
+      # so the binary runs there whether or not the ARCHIVE can run anywhere else.
+      # The real check is "verify the packaged artifact" below, which runs the
+      # thing users actually download. A weaker duplicate that passes when the
+      # strong one would fail is worse than no check at all.
 
       - name: size budget
         shell: bash
@@ -229,6 +212,7 @@ jobs:
       # Testing the build tree says nothing about what got packaged.
       - name: verify the packaged artifact
         shell: bash
+        timeout-minutes: 5
         run: |
           set -eu
           OUT="jsglq-${{ matrix.name }}"
