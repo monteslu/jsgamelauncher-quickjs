@@ -319,6 +319,60 @@ check('unhandled rejections are LOUD, not silent',
   (o) => ({ ok: /UNHANDLED PROMISE REJECTION/.test(o) && /boom/.test(o),
             detail: /UNHANDLED/.test(o) ? 'reported with reason' : 'SILENTLY SWALLOWED' }));
 
+/* -------------------------------------------------------------------- audio -- */
+
+/* These assert on RENDERED SAMPLES, not on "a node was created". Three node
+   types shipped passing type strings the engine rejects, and every
+   connect(ctx.destination) targeted a node id that did not exist — all of which
+   created objects successfully and produced silence. Only reading the output
+   catches that. */
+
+check('audio: a connected oscillator actually produces signal',
+  `const ac=new AudioContext(); const h=globalThis.__jsglq_audio;
+   const rms=a=>{let s=0;for(const v of a)s+=v*v;return Math.sqrt(s/a.length);};
+   const quiet=rms(h.renderOffline(44100,2,1024));
+   const osc=ac.createOscillator(); osc.frequency.value=440;
+   osc.connect(ac.destination); osc.start(0);
+   const loud=rms(h.renderOffline(44100,2,4096));
+   console.log('R:'+quiet.toFixed(3)+','+loud.toFixed(3));`,
+  (o) => {
+    const m = /R:([\d.]+),([\d.]+)/.exec(o);
+    if (!m) return { ok: false, detail: 'no output' };
+    const [, quiet, loud] = m.map(Number);
+    // A full-scale sine has rms 1/sqrt(2) = 0.707.
+    return { ok: quiet === 0 && loud > 0.6 && loud < 0.8,
+             detail: `silence ${quiet}, oscillator ${loud} (expect ~0.707)` };
+  });
+
+check('audio: gain scales the signal by the value set',
+  `const ac=new AudioContext(); const h=globalThis.__jsglq_audio;
+   const rms=a=>{let s=0;for(const v of a)s+=v*v;return Math.sqrt(s/a.length);};
+   const osc=ac.createOscillator(); osc.frequency.value=440;
+   const g1=ac.createGain(); g1.gain.value=0.25;
+   osc.connect(g1); g1.connect(ac.destination); osc.start(0);
+   console.log('R:'+rms(h.renderOffline(44100,2,4096)).toFixed(4));`,
+  (o) => {
+    const m = /R:([\d.]+)/.exec(o);
+    if (!m) return { ok: false, detail: 'no output' };
+    const v = Number(m[1]);
+    // 0.7071 * 0.25 = 0.1768
+    return { ok: Math.abs(v - 0.1768) < 0.02, detail: `${v} (expect ~0.177)` };
+  });
+
+check('audio: every node type the engine implements is reachable and real',
+  `const ac=new AudioContext();
+   const fns=['createGain','createOscillator','createBufferSource','createBiquadFilter',
+     'createStereoPanner','createDelay','createAnalyser','createWaveShaper',
+     'createConvolver','createDynamicsCompressor','createPanner','createConstantSource',
+     'createChannelSplitter','createChannelMerger'];
+   // The engine returns 0 for an unknown type, so a zero id means the node was
+   // never created no matter how well the JS object behaves.
+   const bad=fns.filter(f=>{ const n=ac[f](); return !(n._id>0); });
+   const iir=ac.createIIRFilter(new Float32Array([1,0]),new Float32Array([1,0]));
+   if(!(iir._id>0)) bad.push('createIIRFilter');
+   console.log('R:'+(bad.length?bad.join('|'):'ALL'));`,
+  (o) => ({ ok: /R:ALL/.test(o), detail: (/R:(\S+)/.exec(o) || [])[1] }));
+
 /* ----------------------------------------------------------------- gamepads -- */
 
 /* The Gamepad API shipped as a stub returning four nulls while the README claimed

@@ -358,6 +358,74 @@ static JSValue js_set_iir_coefficients(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+/*
+ * Offline rendering.
+ *
+ * renderOffline(sampleRate, channels, frames) -> Float32Array (interleaved)
+ *
+ * Builds a SEPARATE graph with is_realtime=false, so the engine advances its own
+ * clock instead of waiting on a device callback, renders the requested frames in
+ * 128-sample quanta (the Web Audio quantum the engine pre-sizes its buffers for),
+ * and returns the result.
+ *
+ * This is what makes the audio graph testable at all: without a way to capture
+ * output, "the node was created" is the only thing a test can assert, and this
+ * project has already shipped three node types that created successfully and
+ * processed nothing.
+ */
+static JSValue js_render_offline(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc < 3) return jsglq_throw(ctx, "renderOffline(sampleRate, channels, frames)");
+
+    int32_t rate = 44100, channels = 2, frames = 0;
+    if (JS_ToInt32(ctx, &rate, argv[0])) return JS_EXCEPTION;
+    if (JS_ToInt32(ctx, &channels, argv[1])) return JS_EXCEPTION;
+    if (JS_ToInt32(ctx, &frames, argv[2])) return JS_EXCEPTION;
+
+    if (rate <= 0 || channels <= 0 || channels > 32 || frames <= 0)
+        return jsglq_throw_range(ctx, "renderOffline: bad rate/channels/frames");
+    /* Guard the allocation rather than trusting the caller: frames comes from JS
+       and a large value would otherwise be an unbounded malloc. 10 minutes of
+       stereo at 48k is ~230 MB, well past anything a game needs offline. */
+    if ((int64_t)frames * channels > (int64_t)(120 << 20))
+        return jsglq_throw_range(ctx, "renderOffline: request too large");
+
+    if (g_audio.graph < 0) return jsglq_throw(ctx, "audio not initialized");
+
+    size_t total = (size_t)frames * (size_t)channels;
+    float *out = (float *)calloc(total, sizeof(float));
+    if (!out) return jsglq_throw(ctx, "renderOffline: out of memory");
+
+    /* Render the LIVE graph in 128-frame quanta, the size the engine pre-sizes
+       its scratch buffers for. Held under the same lock the device callback
+       takes, so a concurrent callback cannot process the graph mid-render. */
+    const int QUANTUM = 128;
+    SDL_LockMutex(g_audio.lock);
+    for (int done = 0; done < frames; done += QUANTUM) {
+        int n = frames - done;
+        if (n > QUANTUM) n = QUANTUM;
+        processGraph(g_audio.graph, out + (size_t)done * (size_t)channels, n);
+    }
+    SDL_UnlockMutex(g_audio.lock);
+
+    JSValue ab = JS_NewArrayBufferCopy(ctx, (const uint8_t *)out,
+                                       total * sizeof(float));
+    free(out);
+    if (JS_IsException(ab)) return ab;
+
+    /* Hand back a Float32Array rather than a raw ArrayBuffer so callers can read
+       samples without constructing a view themselves. */
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "Float32Array");
+    JS_FreeValue(ctx, global);
+    JSValue arr = JS_CallConstructor(ctx, ctor, 1, &ab);
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, ab);
+    return arr;
+}
+
 static JSValue js_current_time(JSContext *ctx, JSValueConst this_val,
                                int argc, JSValueConst *argv)
 {
@@ -424,6 +492,8 @@ int jsglq_bind_audio(JsglqEngine *e)
         JS_NewCFunction(ctx, js_set_waveshaper_oversample, "setWaveShaperOversample", 2));
     JS_SetPropertyStr(ctx, a, "setIIRCoefficients",
         JS_NewCFunction(ctx, js_set_iir_coefficients, "setIIRCoefficients", 3));
+    JS_SetPropertyStr(ctx, a, "renderOffline",
+        JS_NewCFunction(ctx, js_render_offline, "renderOffline", 3));
     JS_SetPropertyStr(ctx, a, "currentTime",
         JS_NewCFunction(ctx, js_current_time, "currentTime", 0));
     JS_SetPropertyStr(ctx, a, "scheduleParam",

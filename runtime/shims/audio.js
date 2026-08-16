@@ -338,7 +338,10 @@ export function installAudio(g) {
 
   class AudioDestinationNode extends AudioNode {
     constructor(ctx) {
-      super(ctx, 0);              // node 0 is the engine's destination
+      // The engine allocates its destination from next_id, which starts at 1 —
+      // NOT 0. Hardcoding 0 meant every connect(ctx.destination) pointed at a
+      // node that does not exist, so nothing was ever routed to the output.
+      super(ctx, 1);
       this.maxChannelCount = 2;
     }
   }
