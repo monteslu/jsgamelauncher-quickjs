@@ -166,7 +166,7 @@ every attribution requirement.
 | Audio | mp3/wav/flac/ogg decode, all 15 Web Audio node types (incl. 3D panner, convolver, compressor), `<audio>`, **~12 ms latency** |
 | Workers | real OS threads, **2.5–3.4× measured speedup** |
 | Storage | `localStorage` persists to disk; `sessionStorage` separate |
-| Networking | `fetch` and `XHR`, rooted at the game directory; `WebSocket` over `ws://` |
+| Networking | `fetch`/`XHR` (local assets **and** `http://`/`https://` with verified TLS), `WebSocket` (`ws://`, `wss://`) |
 
 **Not supported:** WebAssembly (deferred — WAMR trails V8 at wasm by more than
 QuickJS trails V8 at JS, so wasm games get a better experience on jsgamelauncher),

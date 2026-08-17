@@ -421,3 +421,11 @@ jobs:
       - run: xvfb-run -a node test/regression/run.mjs
         env:
           SDL_AUDIODRIVER: dummy
+
+      # Networking runs against servers the test starts itself, so it needs no
+      # outbound access and cannot be flaky on a runner with restricted egress.
+      # The https checks are opt-in (JSGLQ_NET_LIVE=1) and deliberately not run
+      # here for that reason.
+      - run: xvfb-run -a node test/net/run.mjs
+        env:
+          SDL_AUDIODRIVER: dummy
