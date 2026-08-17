@@ -365,17 +365,26 @@ static JSValue js_gamepad_poll(JSContext *ctx, JSValueConst this_val,
                 JS_SetPropertyStr(ctx, c, BTN[k].name,
                     JS_NewInt32(ctx, SDL_GameControllerGetButton(p->ctrl, BTN[k].b)));
             }
-            static const struct { const char *name; SDL_GameControllerAxis a; } AX[] = {
-                { "leftStickX", SDL_CONTROLLER_AXIS_LEFTX },
-                { "leftStickY", SDL_CONTROLLER_AXIS_LEFTY },
-                { "rightStickX", SDL_CONTROLLER_AXIS_RIGHTX },
-                { "rightStickY", SDL_CONTROLLER_AXIS_RIGHTY },
-                { "leftTrigger", SDL_CONTROLLER_AXIS_TRIGGERLEFT },
-                { "rightTrigger", SDL_CONTROLLER_AXIS_TRIGGERRIGHT },
+            static const struct { const char *name; SDL_GameControllerAxis a; int is_trigger; } AX[] = {
+                { "leftStickX", SDL_CONTROLLER_AXIS_LEFTX, 0 },
+                { "leftStickY", SDL_CONTROLLER_AXIS_LEFTY, 0 },
+                { "rightStickX", SDL_CONTROLLER_AXIS_RIGHTX, 0 },
+                { "rightStickY", SDL_CONTROLLER_AXIS_RIGHTY, 0 },
+                { "leftTrigger", SDL_CONTROLLER_AXIS_TRIGGERLEFT, 1 },
+                { "rightTrigger", SDL_CONTROLLER_AXIS_TRIGGERRIGHT, 1 },
             };
             for (size_t k = 0; k < sizeof(AX) / sizeof(AX[0]); k++) {
                 double v = SDL_GameControllerGetAxis(p->ctrl, AX[k].a) / 32767.0;
                 if (v < -1.0) v = -1.0;
+                if (AX[k].is_trigger) {
+                    /* SDL specifies triggers as 0..32767 and never negative, but a
+                       device or mapping that describes the trigger as a full-range
+                       axis rests it at -32768. Passing that through reports a
+                       RESTING trigger as fully pressed — which is exactly what a
+                       CI runner's SDL did, while the same code read 0 locally.
+                       Clamping to the documented range makes both agree. */
+                    if (v < 0.0) v = 0.0;
+                }
                 JS_SetPropertyStr(ctx, c, AX[k].name, JS_NewFloat64(ctx, v));
             }
             JS_SetPropertyStr(ctx, o, "ctrl", c);
