@@ -409,6 +409,7 @@ int main(int argc, char **argv)
     jsglq_bind_audio_decode(engine);
     jsglq_bind_worker(engine);
     jsglq_bind_gamepad(engine);
+    jsglq_bind_websocket(engine);
     /* After binding (which opens already-connected pads) so the rescan inside
        the loader promotes them from raw joysticks to mapped controllers. */
     jsglq_gamepad_load_db_file(runtime_dir);

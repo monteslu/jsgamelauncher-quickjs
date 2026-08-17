@@ -235,6 +235,28 @@ int jsglq_core_pump_raf(JSContext *ctx, double timestamp_ms)
 {
     g_core.frame_time_ms = timestamp_ms;
 
+    /* Per-frame JS hooks (WebSocket queue drain, gamepad connect/disconnect
+       events) run BEFORE the early return below: a game that only uses sockets
+       registers no rAF callback, and hooking after the return would leave it
+       connected but never delivered a message. */
+    {
+        JSValue global = JS_GetGlobalObject(ctx);
+        JSValue hook = JS_GetPropertyStr(ctx, global, "__jsglq_frameHook");
+        if (JS_IsFunction(ctx, hook)) {
+            JSValue r = JS_Call(ctx, hook, JS_UNDEFINED, 0, NULL);
+            if (JS_IsException(r)) {
+                JSValue exc = JS_GetException(ctx);
+                const char *msg = JS_ToCString(ctx, exc);
+                fprintf(stderr, "jsglq: frame hook threw: %s\n", msg ? msg : "?");
+                if (msg) JS_FreeCString(ctx, msg);
+                JS_FreeValue(ctx, exc);
+            }
+            JS_FreeValue(ctx, r);
+        }
+        JS_FreeValue(ctx, hook);
+        JS_FreeValue(ctx, global);
+    }
+
     const int n = g_core.raf_count;
     if (n == 0) return 0;
 

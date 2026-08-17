@@ -86,6 +86,8 @@ void jsglq_gamepad_init(void);
 void jsglq_gamepad_shutdown(void);
 int  jsglq_gamepad_load_db(const char *text);
 int  jsglq_gamepad_load_db_file(const char *runtime_dir);
+int jsglq_bind_websocket(JsglqEngine *e);  /* ws:// over SDL_net */
+void jsglq_websocket_shutdown(void);
 void jsglq_worker_shutdown(JSContext *ctx);
 void jsglq_pump_workers(JSContext *ctx);
 

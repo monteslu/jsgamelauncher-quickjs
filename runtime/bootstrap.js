@@ -21,6 +21,7 @@ import { installStorage } from './shims/storage.js';
 import { installXHR } from './shims/xhr.js';
 import { installGamepads } from './shims/gamepad.js';
 import { installPath2D } from './shims/path2d.js';
+import { installWebSocket } from './shims/websocket.js';
 
 export function bootstrap({ width, height }) {
   installMisc(globalThis);
@@ -36,6 +37,20 @@ export function bootstrap({ width, height }) {
      provides Event + dispatchEvent for gamepadconnected). */
   installGamepads(globalThis);
   installPath2D(globalThis);
+  // Returns a pump (or null when built without SDL_net); WebSocket events
+  // only exist because this drains the host queue each frame.
+  const pumpWebSockets = installWebSocket(globalThis);
+
+  /* One hook the host calls per frame, before rAF callbacks. Registered only
+     when something needs it, so the common case costs a property lookup. */
+  const frameHooks = [];
+  if (pumpWebSockets) frameHooks.push(pumpWebSockets);
+  if (globalThis.__jsglq_pumpGamepadEvents) {
+    frameHooks.push(globalThis.__jsglq_pumpGamepadEvents);
+  }
+  if (frameHooks.length) {
+    globalThis.__jsglq_frameHook = () => { for (const h of frameHooks) h(); };
+  }
   if (globalThis.__jsglq_worker) installWorker(globalThis);
   if (globalThis.__jsglq_audio) installAudio(globalThis);
   return canvas;

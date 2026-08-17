@@ -50,6 +50,10 @@ if(UNIX AND NOT APPLE)
   pkg_check_modules(SDL2 REQUIRED sdl2)
   pkg_check_modules(EGL REQUIRED egl)
   pkg_check_modules(GLES REQUIRED glesv2)
+  # SDL_net gives cross-platform TCP without a Winsock/BSD split of our own.
+  # Optional: a build without it simply has no WebSocket, which the runtime
+  # reports honestly rather than pretending to connect.
+  pkg_check_modules(SDL2_NET sdl2_net)
 else()
   # Homebrew ships SDL2 with pkg-config but not always a CMake config package, and
   # vcpkg ships the config but no pkg-config. Try the config first and fall back,
@@ -86,6 +90,19 @@ else()
   # The config package exposes an imported target; pkg-config exposes raw flags.
   if(TARGET SDL2::SDL2)
     set(SDL2_LIBRARIES SDL2::SDL2)
+  endif()
+
+  # SDL_net, discovered the same two ways for the same reason as SDL2 itself.
+  find_package(SDL2_net CONFIG QUIET)
+  if(SDL2_net_FOUND)
+    set(SDL2_NET_FOUND TRUE)
+    if(TARGET SDL2_net::SDL2_net)
+      set(SDL2_NET_LIBRARIES SDL2_net::SDL2_net)
+    elseif(TARGET SDL2_net::SDL2_net-static)
+      set(SDL2_NET_LIBRARIES SDL2_net::SDL2_net-static)
+    endif()
+  elseif(PkgConfig_FOUND)
+    pkg_check_modules(SDL2_NET sdl2_net)
   endif()
 endif()
 
@@ -233,6 +250,7 @@ add_executable(jsglq
   src/bind_audio.c
   src/bind_worker.c
   src/bind_gamepad.c
+  src/bind_websocket.c
   src/bundle.c
   src/sprite2d.c
   src/bind_gl.cpp
@@ -255,6 +273,19 @@ target_link_libraries(jsglq PRIVATE
   $<$<BOOL:${HAVE_WEBAUDIO}>:webaudio>
   ${SDL2_LIBRARIES} ${EGL_LIBRARIES} ${GLES_LIBRARIES}
 )
+if(SDL2_NET_FOUND)
+  target_compile_definitions(jsglq PRIVATE JSGLQ_HAVE_WEBSOCKET=1)
+  target_include_directories(jsglq PRIVATE ${SDL2_NET_INCLUDE_DIRS})
+  target_link_libraries(jsglq PRIVATE ${SDL2_NET_LIBRARIES})
+  target_link_directories(jsglq PRIVATE ${SDL2_NET_LIBRARY_DIRS})
+else()
+  message(WARNING
+    "SDL2_net not found; WebSocket will be unavailable in this build.\n"
+    "  Linux:   apt install libsdl2-net-dev\n"
+    "  macOS:   brew install sdl2_net\n"
+    "  Windows: vcpkg install sdl2-net")
+endif()
+
 if(WIN32)
   # winmm supplies timeBeginPeriod, which platform.c needs to get sleeps finer
   # than the default ~15ms scheduler tick. m/dl/pthread are POSIX and are folded

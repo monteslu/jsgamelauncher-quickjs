@@ -62,8 +62,8 @@ jobs:
         working-directory: .
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build libsdl2-dev libegl-dev \
-                                  libgles-dev libgl1-mesa-dri xvfb
+          sudo apt-get install -y cmake ninja-build libsdl2-dev libsdl2-net-dev \
+                                  libegl-dev libgles-dev libgl1-mesa-dri xvfb
 
       # Build REAL SDL2 from source rather than `brew install sdl2`.
       #
@@ -98,6 +98,22 @@ jobs:
           cmake --install sdl2-build
           echo "SDL2_DIR=$PWD/sdl2-prefix/lib/cmake/SDL2" >> $GITHUB_ENV
           echo "CMAKE_PREFIX_PATH=$PWD/sdl2-prefix" >> $GITHUB_ENV
+
+          # SDL_net links against SDL2, so build it against the SDL2 we just
+          # built rather than mixing in a Homebrew SDL_net compiled against
+          # sdl2-compat — which would drag the shim back in through the side
+          # door and reintroduce the modal-dialog hang.
+          curl -fsSL -o SDL2_net.tar.gz \
+            https://github.com/libsdl-org/SDL_net/releases/download/release-2.2.0/SDL2_net-2.2.0.tar.gz
+          tar xzf SDL2_net.tar.gz
+          cmake -S SDL2_net-2.2.0 -B sdl2net-build -G Ninja \
+            -DCMAKE_C_FLAGS="-g0 -ffile-prefix-map=$PWD=." \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$PWD/sdl2-prefix" \
+            -DCMAKE_PREFIX_PATH="$PWD/sdl2-prefix" \
+            -DSDL2NET_SAMPLES=OFF
+          cmake --build sdl2net-build
+          cmake --install sdl2net-build
           # Prove we got real SDL2, not the compat shim: sdl2-compat exports
           # dllinit/error_dialog, which is what raised the modal dialog.
           if nm -gU "$PWD/sdl2-prefix/lib/libSDL2-2.0.0.dylib" | grep -q "error_dialog"; then
@@ -114,7 +130,7 @@ jobs:
           # Match the runner's own architecture: an arm64 runner cannot use x64
           # SDL2 binaries.
           $triplet = if ("${{ matrix.name }}" -eq "windows-arm64") { "arm64-windows" } else { "x64-windows" }
-          vcpkg install "sdl2:$triplet"
+          vcpkg install "sdl2:$triplet" "sdl2-net:$triplet"
           # CMake finds vcpkg packages ONLY through its toolchain file; installing
           # alone is not enough and fails at find_package.
           echo "CMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" >> $env:GITHUB_ENV
