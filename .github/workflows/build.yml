@@ -77,7 +77,7 @@ jobs:
       - name: deps (macos)
         if: matrix.platform == 'darwin'
         working-directory: .
-        run: brew install cmake ninja
+        run: brew install cmake ninja mbedtls
 
       - name: build SDL2 from source (macos)
         if: matrix.platform == 'darwin'
@@ -130,7 +130,7 @@ jobs:
           # Match the runner's own architecture: an arm64 runner cannot use x64
           # SDL2 binaries.
           $triplet = if ("${{ matrix.name }}" -eq "windows-arm64") { "arm64-windows" } else { "x64-windows" }
-          vcpkg install "sdl2:$triplet" "sdl2-net:$triplet"
+          vcpkg install "sdl2:$triplet" "sdl2-net:$triplet" "mbedtls:$triplet"
           # CMake finds vcpkg packages ONLY through its toolchain file; installing
           # alone is not enough and fails at find_package.
           echo "CMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" >> $env:GITHUB_ENV

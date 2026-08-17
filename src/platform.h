@@ -19,6 +19,9 @@
 #define JSGLQ_PLATFORM_H
 
 #include <stdbool.h>
+#ifndef _WIN32
+#include <strings.h>
+#endif
 #include <stddef.h>
 
 #ifdef __cplusplus
@@ -50,6 +53,17 @@ bool jsglq_is_dir(const char *path);
 
 /* The OS temp directory, without a trailing separator. */
 void jsglq_temp_dir(char *out, size_t out_size);
+
+/* Case-insensitive prefix compare.
+ *
+ * strncasecmp is POSIX; MSVC spells it _strnicmp and does not provide the POSIX
+ * name at all, so using it directly links everywhere except Windows. HTTP header
+ * names are case-insensitive, which is why this exists. */
+#ifdef _WIN32
+  #define jsglq_strncasecmp _strnicmp
+#else
+  #define jsglq_strncasecmp strncasecmp
+#endif
 
 /* Join two path components into `out`.
  *

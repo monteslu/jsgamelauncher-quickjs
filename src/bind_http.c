@@ -14,6 +14,7 @@
  */
 #include "host.h"
 #include "net_tls.h"
+#include "platform.h"
 
 #include <SDL2/SDL.h>
 #include <string.h>
@@ -137,7 +138,7 @@ static const char *find_header(const char *headers, const char *name)
         const char *eol = strstr(p, "\r\n");
         if (!eol) break;
         /* Header names are case-insensitive. */
-        if ((size_t)(eol - p) > nlen && !strncasecmp(p, name, nlen) && p[nlen] == ':') {
+        if ((size_t)(eol - p) > nlen && !jsglq_strncasecmp(p, name, nlen) && p[nlen] == ':') {
             const char *v = p + nlen + 1;
             while (*v == ' ') v++;
             return v;
@@ -299,7 +300,7 @@ static int http_thread(void *data)
         /* Chunked transfer-encoding, decoded in place: each chunk is a hex
            length, CRLF, data, CRLF, terminated by a zero-length chunk. */
         const char *te = find_header(headers, "Transfer-Encoding");
-        if (te && !strncasecmp(te, "chunked", 7)) {
+        if (te && !jsglq_strncasecmp(te, "chunked", 7)) {
             size_t in = 0, out = 0;
             while (in < len) {
                 char *endptr = NULL;

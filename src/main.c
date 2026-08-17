@@ -367,20 +367,23 @@ int main(int argc, char **argv)
 
             char candidate[4096], probe[4096];
 
+            /* Checked joins throughout: a truncated path here would silently
+               probe the WRONG directory, which is how a launcher ends up
+               reporting "runtime missing" while looking somewhere unrelated. */
+
             /* Beside the binary (release archive). */
-            snprintf(candidate, sizeof(candidate), "%s/runtime", d);
-            snprintf(probe, sizeof(probe), "%s/bootstrap.js", candidate);
-            if (jsglq_is_file(probe)) {
+            if (jsglq_join_path(candidate, sizeof(candidate), d, "runtime") &&
+                jsglq_join_path(probe, sizeof(probe), candidate, "bootstrap.js") &&
+                jsglq_is_file(probe)) {
                 snprintf(runtime_dir, sizeof(runtime_dir), "%s", candidate);
             }
 
             /* One level up (dev tree: build/jsglq + runtime/). */
-            if (!runtime_dir[0]) {
-                snprintf(candidate, sizeof(candidate), "%s/../runtime", d);
-                snprintf(probe, sizeof(probe), "%s/bootstrap.js", candidate);
-                if (jsglq_is_file(probe)) {
-                    snprintf(runtime_dir, sizeof(runtime_dir), "%s", candidate);
-                }
+            if (!runtime_dir[0] &&
+                jsglq_join_path(candidate, sizeof(candidate), d, "../runtime") &&
+                jsglq_join_path(probe, sizeof(probe), candidate, "bootstrap.js") &&
+                jsglq_is_file(probe)) {
+                snprintf(runtime_dir, sizeof(runtime_dir), "%s", candidate);
             }
         }
         if (!runtime_dir[0]) snprintf(runtime_dir, sizeof(runtime_dir), "./runtime");

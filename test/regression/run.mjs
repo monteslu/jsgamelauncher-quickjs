@@ -482,6 +482,28 @@ check('gamepad: a connected pad is reported with the standard mapping',
    }`,
   (o) => ({ ok: /R:standard,17,4/.test(o), detail: (/R:(\S+)/.exec(o) || [])[1] }));
 
+check('gamepad: triggers rest at zero, not fully pressed',
+  `const h=globalThis.__jsglq_gamepad;
+   const dev=h.virtualAttach();
+   const slot=navigator.getGamepads().filter(Boolean).pop().index;
+   const raw=h.poll().find(r=>r.index===slot);
+   const p=navigator.getGamepads()[slot];
+   h.virtualDetach(dev);
+   // Report BOTH the raw SDL view and the mapped view: when these disagree the
+   // bug is in our mapping, and when they agree it is in SDL's view of the pad.
+   console.log('R:'+(raw.ctrl?raw.ctrl.leftTrigger.toFixed(3):'n/a')+','
+     +(raw.ctrl?raw.ctrl.rightTrigger.toFixed(3):'n/a')+','
+     +p.buttons[6].value.toFixed(3)+','+p.buttons[7].value.toFixed(3)+','
+     +p.buttons[6].pressed+','+p.buttons[7].pressed
+     +'|rawaxes='+JSON.stringify(raw.axes));`,
+  (o) => {
+    const m = /R:([^|]*)\|rawaxes=(\S+)/.exec(o);
+    if (!m) return { ok: false, detail: 'no result' };
+    const [lt, rt, b6, b7, p6, p7] = m[1].split(',');
+    return { ok: p6 === 'false' && p7 === 'false',
+             detail: `ctrl lt=${lt} rt=${rt}, button6=${b6}/${p6} button7=${b7}/${p7}, raw axes ${m[2]}` };
+  });
+
 check('gamepad: button presses reach JS in W3C standard order',
   `const h=globalThis.__jsglq_gamepad;
    const dev=h.virtualAttach();
