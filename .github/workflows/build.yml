@@ -130,6 +130,13 @@ jobs:
           # Match the runner's own architecture: an arm64 runner cannot use x64
           # SDL2 binaries.
           $triplet = if ("${{ matrix.name }}" -eq "windows-arm64") { "arm64-windows" } else { "x64-windows" }
+          # Fully static triplet (-static, NOT -static-md): our binary links the
+          # CRT statically via CMAKE_MSVC_RUNTIME_LIBRARY so a clean Windows
+          # install needs no VC++ redistributable. vcpkg's default triplet builds
+          # against the DYNAMIC CRT, and mixing the two fails at link with
+          # unresolved __imp_fgets and friends from mbedcrypto. -static-md would
+          # be wrong here too: that is static libs with a dynamic CRT.
+          $triplet = "$triplet-static"
           vcpkg install "sdl2:$triplet" "sdl2-net:$triplet" "mbedtls:$triplet"
           # CMake finds vcpkg packages ONLY through its toolchain file; installing
           # alone is not enough and fails at find_package.

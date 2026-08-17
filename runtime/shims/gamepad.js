@@ -28,6 +28,22 @@ const STANDARD_BUTTONS = [
 // value it is not "pressed" — matches the threshold jsgamelauncher settled on.
 const TRIGGER_THRESHOLD = 0.11;
 
+/*
+ * Resting position varies by mapping, and assuming one was wrong twice: a pad
+ * described with a full-range axis rests at -1, SDL's virtual gamepad rests at
+ * 0.5, and a correctly mapped trigger rests at 0. Anything at or below this is
+ * treated as released, which covers all three without needing to know which
+ * kind of pad is attached. A real pull goes well past it.
+ */
+const TRIGGER_DEADZONE = 0.6;
+
+function triggerValue(v) {
+  const t = v ?? 0;
+  if (t <= TRIGGER_DEADZONE) return 0;
+  // Rescale so the usable travel still spans 0..1 rather than starting partway.
+  return (t - TRIGGER_DEADZONE) / (1 - TRIGGER_DEADZONE);
+}
+
 // SDL hat bits (SDL_HAT_UP etc). A hat is how most cheap pads report their dpad.
 const HAT_UP = 0x01, HAT_RIGHT = 0x02, HAT_DOWN = 0x04, HAT_LEFT = 0x08;
 
@@ -46,8 +62,8 @@ function fromController(raw) {
 
   // Triggers: SDL reports 0..1 on its own axis. Populate BOTH the button
   // (indices 6/7, analog value) and the axis, as a browser does.
-  const lt = c.leftTrigger ?? 0;
-  const rt = c.rightTrigger ?? 0;
+  const lt = triggerValue(c.leftTrigger);
+  const rt = triggerValue(c.rightTrigger);
   buttons[6] = makeButton(lt > TRIGGER_THRESHOLD, lt);
   buttons[7] = makeButton(rt > TRIGGER_THRESHOLD, rt);
 

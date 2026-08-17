@@ -120,8 +120,13 @@ else()
     set(GLES_LIBRARIES ${ANGLE_DIR}/lib/libGLESv2.lib)
   endif()
   # The config package exposes an imported target; pkg-config exposes raw flags.
+  # A STATIC vcpkg build exports SDL2::SDL2-static instead, and picking the wrong
+  # one leaves SDL2_LIBRARIES empty — which links with undefined SDL symbols
+  # rather than saying anything useful.
   if(TARGET SDL2::SDL2)
     set(SDL2_LIBRARIES SDL2::SDL2)
+  elseif(TARGET SDL2::SDL2-static)
+    set(SDL2_LIBRARIES SDL2::SDL2-static)
   endif()
 
   # SDL_net, discovered the same two ways for the same reason as SDL2 itself.
@@ -139,12 +144,34 @@ else()
 
   # mbedTLS, same two-way discovery. vcpkg ships a CMake config; Homebrew ships
   # pkg-config.
+  # Homebrew's mbedtls is KEG-ONLY: not on the default search path, and its
+  # exported CMake target names differ between versions. Search the keg
+  # explicitly and fall back to plain find_library, which works regardless of
+  # what the formula chose to export.
+  if(APPLE)
+    foreach(prefix /opt/homebrew/opt/mbedtls /usr/local/opt/mbedtls)
+      if(EXISTS ${prefix})
+        list(APPEND CMAKE_PREFIX_PATH ${prefix})
+      endif()
+    endforeach()
+  endif()
+
   find_package(MbedTLS CONFIG QUIET)
-  if(MbedTLS_FOUND)
+  if(MbedTLS_FOUND AND TARGET MbedTLS::mbedtls)
     set(MBEDTLS_FOUND TRUE)
     set(MBEDTLS_LIBRARIES MbedTLS::mbedtls MbedTLS::mbedx509 MbedTLS::mbedcrypto)
-  elseif(PkgConfig_FOUND)
-    pkg_check_modules(MBEDTLS mbedtls)
+  else()
+    if(PkgConfig_FOUND)
+      pkg_check_modules(MBEDTLS mbedtls)
+      if(MBEDTLS_FOUND)
+        # Same split as on Linux: the .pc names only -lmbedtls.
+        find_library(MBEDX509_LIB mbedx509)
+        find_library(MBEDCRYPTO_LIB mbedcrypto)
+        if(MBEDX509_LIB AND MBEDCRYPTO_LIB)
+          list(APPEND MBEDTLS_LIBRARIES ${MBEDX509_LIB} ${MBEDCRYPTO_LIB})
+        endif()
+      endif()
+    endif()
     if(NOT MBEDTLS_FOUND)
       find_library(MBEDTLS_LIB mbedtls)
       find_library(MBEDX509_LIB mbedx509)

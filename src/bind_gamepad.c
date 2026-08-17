@@ -377,12 +377,12 @@ static JSValue js_gamepad_poll(JSContext *ctx, JSValueConst this_val,
                 double v = SDL_GameControllerGetAxis(p->ctrl, AX[k].a) / 32767.0;
                 if (v < -1.0) v = -1.0;
                 if (AX[k].is_trigger) {
-                    /* SDL specifies triggers as 0..32767 and never negative, but a
-                       device or mapping that describes the trigger as a full-range
-                       axis rests it at -32768. Passing that through reports a
-                       RESTING trigger as fully pressed — which is exactly what a
-                       CI runner's SDL did, while the same code read 0 locally.
-                       Clamping to the documented range makes both agree. */
+                    /* SDL documents triggers as 0..32767, but what actually
+                       arrives depends on the mapping: a pad described with a
+                       full-range axis rests at -1, and SDL's own VIRTUAL gamepad
+                       rests at 0.5. Clamp to the documented range here and let
+                       the JS side apply a deadzone — guessing a resting value in
+                       C was wrong twice. */
                     if (v < 0.0) v = 0.0;
                 }
                 JS_SetPropertyStr(ctx, c, AX[k].name, JS_NewFloat64(ctx, v));
