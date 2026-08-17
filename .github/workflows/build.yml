@@ -36,24 +36,24 @@ jobs:
         working-directory: jsgamelauncher-quickjs
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           path: jsgamelauncher-quickjs
 
       # Both are consumed as SOURCE and compiled here with zero edits.
       - name: checkout native-gles
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: monteslu/native-gles
           path: native-gles
       - name: checkout webaudio-node
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: monteslu/webaudio-node
           path: webaudio-node
 
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
+      - uses: actions/setup-node@v5
+        with: { node-version: 24 }
 
       # Linux: system EGL/GLES plus the software rasterizer, since CI runners have
       # no GPU and the smoke test renders for real rather than trusting exit codes.
@@ -355,7 +355,7 @@ jobs:
           fi
 
       - name: upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: jsglq-${{ matrix.name }}
           path: jsgamelauncher-quickjs/dist/jsglq-${{ matrix.name }}
@@ -368,7 +368,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with: { path: artifacts }
       - name: archive each platform
         run: |
@@ -400,11 +400,11 @@ jobs:
         working-directory: jsgamelauncher-quickjs
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { path: jsgamelauncher-quickjs }
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { repository: monteslu/native-gles, path: native-gles }
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { repository: monteslu/webaudio-node, path: webaudio-node }
       - run: |
           sudo apt-get update
