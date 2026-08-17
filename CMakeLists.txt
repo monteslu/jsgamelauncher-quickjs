@@ -53,11 +53,26 @@ if(UNIX AND NOT APPLE)
   # SDL_net gives cross-platform TCP without a Winsock/BSD split of our own.
   # Optional: a build without it simply has no WebSocket, which the runtime
   # reports honestly rather than pretending to connect.
-  pkg_check_modules(SDL2_NET sdl2_net)
+  # The module is spelled SDL2_net on Debian/Ubuntu and sdl2_net elsewhere;
+  # checking one spelling silently disables WebSocket on the other.
+  pkg_check_modules(SDL2_NET SDL2_net)
+  if(NOT SDL2_NET_FOUND)
+    pkg_check_modules(SDL2_NET sdl2_net)
+  endif()
   # mbedTLS for https:// and wss://. Optional in the same way SDL_net is: without
   # it the build still works, TLS URLs throw by name, and nothing pretends to be
   # encrypted.
   pkg_check_modules(MBEDTLS mbedtls)
+  if(MBEDTLS_FOUND)
+    # mbedtls.pc advertises only -lmbedtls, but the library is split in three and
+    # the linker needs all of them: without this the build fails at link with
+    # "libmbedx509.so: DSO missing from command line".
+    find_library(MBEDX509_LIB mbedx509)
+    find_library(MBEDCRYPTO_LIB mbedcrypto)
+    if(MBEDX509_LIB AND MBEDCRYPTO_LIB)
+      list(APPEND MBEDTLS_LIBRARIES ${MBEDX509_LIB} ${MBEDCRYPTO_LIB})
+    endif()
+  endif()
   if(NOT MBEDTLS_FOUND)
     # mbedTLS 3.x ships no pkg-config in some distros; fall back to finding the
     # three libraries it splits into.

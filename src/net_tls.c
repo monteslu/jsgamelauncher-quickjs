@@ -33,16 +33,8 @@
 #include <mbedtls/error.h>
 #endif
 
-#ifdef JSGLQ_HAVE_WEBSOCKET
-#include <SDL2/SDL_net.h>
-#endif
-
 struct JsglqStream {
     int secure;
-
-#ifdef JSGLQ_HAVE_WEBSOCKET
-    TCPsocket plain;            /* used when !secure */
-#endif
 
 #ifdef JSGLQ_HAVE_TLS
     mbedtls_net_context      net;
@@ -181,22 +173,28 @@ JsglqStream *jsglq_stream_connect(const char *host, int port, int secure,
 #endif
     }
 
-#ifndef JSGLQ_HAVE_WEBSOCKET
+#ifndef JSGLQ_HAVE_TLS
     snprintf(err, errlen, "networking is not available in this build");
     return NULL;
 #else
+    /*
+     * Plaintext uses mbedTLS's socket layer too, NOT SDL_net.
+     *
+     * SDL_net's TCP_Recv blocks until it has the full requested length, and its
+     * SDLNet_CheckSockets never returned at all when the set was polled from the
+     * worker thread — a request simply hung forever with no error. mbedTLS ships
+     * mbedtls_net_recv_timeout, which does a PARTIAL read with a real timeout,
+     * which is the semantics an HTTP or WebSocket reader actually needs. Using it
+     * for both modes also means one socket implementation instead of two.
+     */
     JsglqStream *s = (JsglqStream *)calloc(1, sizeof(JsglqStream));
     if (!s) { snprintf(err, errlen, "out of memory"); return NULL; }
     s->secure = 0;
+    mbedtls_net_init(&s->net);
 
-    IPaddress ip;
-    if (SDLNet_ResolveHost(&ip, host, (Uint16)port) < 0) {
-        snprintf(err, errlen, "cannot resolve %s", host);
-        free(s);
-        return NULL;
-    }
-    s->plain = SDLNet_TCP_Open(&ip);
-    if (!s->plain) {
+    char portstr[16];
+    snprintf(portstr, sizeof(portstr), "%d", port);
+    if (mbedtls_net_connect(&s->net, host, portstr, MBEDTLS_NET_PROTO_TCP) != 0) {
         snprintf(err, errlen, "cannot connect to %s:%d", host, port);
         free(s);
         return NULL;
@@ -221,8 +219,18 @@ int jsglq_stream_send(JsglqStream *s, const void *data, int len)
         return sent;
     }
 #endif
-#ifdef JSGLQ_HAVE_WEBSOCKET
-    return SDLNet_TCP_Send(s->plain, data, len);
+#ifdef JSGLQ_HAVE_TLS
+    {
+        int sent = 0;
+        while (sent < len) {
+            int rc = mbedtls_net_send(&s->net, (const unsigned char *)data + sent,
+                                      (size_t)(len - sent));
+            if (rc == MBEDTLS_ERR_SSL_WANT_WRITE) continue;
+            if (rc <= 0) return sent > 0 ? sent : -1;
+            sent += rc;
+        }
+        return sent;
+    }
 #else
     (void)data; return -1;
 #endif
@@ -243,8 +251,17 @@ int jsglq_stream_recv(JsglqStream *s, void *buf, int len)
         }
     }
 #endif
-#ifdef JSGLQ_HAVE_WEBSOCKET
-    return SDLNet_TCP_Recv(s->plain, buf, len);
+#ifdef JSGLQ_HAVE_TLS
+    {
+        /* Partial read with a timeout: returns as soon as ANY data is available
+           rather than waiting for the full buffer, which is what an HTTP header
+           reader and a WebSocket frame reader both need. */
+        int rc = mbedtls_net_recv_timeout(&s->net, (unsigned char *)buf,
+                                          (size_t)len, 30000);
+        if (rc == MBEDTLS_ERR_SSL_TIMEOUT) return -1;
+        if (rc == MBEDTLS_ERR_SSL_WANT_READ) return 0;
+        return rc < 0 ? -1 : rc;
+    }
 #else
     (void)buf; return -1;
 #endif
@@ -266,8 +283,8 @@ void jsglq_stream_close(JsglqStream *s)
         return;
     }
 #endif
-#ifdef JSGLQ_HAVE_WEBSOCKET
-    if (s->plain) SDLNet_TCP_Close(s->plain);
+#ifdef JSGLQ_HAVE_TLS
+    mbedtls_net_free(&s->net);
 #endif
     free(s);
 }

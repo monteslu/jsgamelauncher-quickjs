@@ -16,7 +16,7 @@
  */
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -28,23 +28,33 @@ const BIN = join(ROOT, 'build', 'jsglq');
 let pass = 0, fail = 0;
 const failures = [];
 
+/*
+ * ASYNC, deliberately.
+ *
+ * spawnSync blocks Node's event loop, so the test server in THIS process can
+ * never accept the connection the child is making — the child then waits for a
+ * response that cannot come and every test times out. That failure looks
+ * exactly like a broken HTTP client, and cost a long debugging detour before
+ * `curl` against the same server failed too and showed the fixture was at
+ * fault, not the runtime.
+ */
 function run(source, { timeout = 20000 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'jsglq-net-'));
   writeFileSync(join(dir, 'main.js'), source);
-  try {
-    const r = spawnSync(BIN, ['--headless', '--max-seconds=8', dir], {
+  return new Promise((resolve) => {
+    execFile(BIN, ['--headless', '--max-seconds=8', dir], {
       encoding: 'utf8',
       timeout,
       env: { ...process.env, LIBGL_ALWAYS_SOFTWARE: '1', EGL_PLATFORM: 'surfaceless' },
+    }, (_err, stdout, stderr) => {
+      rmSync(dir, { recursive: true, force: true });
+      resolve((stdout || '') + (stderr || ''));
     });
-    return (r.stdout || '') + (r.stderr || '');
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  });
 }
 
-function check(name, source, verify) {
-  const out = run(source);
+async function check(name, source, verify) {
+  const out = await run(source);
   let res;
   try { res = verify(out); } catch (e) { res = { ok: false, detail: e.message }; }
   if (res.ok) { pass++; console.log(`  ok    ${name}${res.detail ? '  — ' + res.detail : ''}`); }
@@ -132,61 +142,61 @@ console.log(`\n=== networking tests (server on 127.0.0.1:${PORT}) ===\n`);
 
 /* ----------------------------------------------------------------- fetch -- */
 
-check('fetch: GET a remote URL returns the body',
+await check('fetch: GET a remote URL returns the body',
   `fetch('${BASE}/hello').then(r => r.text()).then(t => console.log('R:' + t))
      .catch(e => console.log('R:ERR:' + e.message));`,
   (o) => ({ ok: /R:hello from the test server/.test(o),
             detail: (/R:(.*)/.exec(o) || [])[1] }));
 
-check('fetch: status and statusText survive',
+await check('fetch: status and statusText survive',
   `fetch('${BASE}/notfound').then(r => console.log('R:' + r.status + ',' + r.ok))
      .catch(e => console.log('R:ERR:' + e.message));`,
   (o) => ({ ok: /R:404,false/.test(o), detail: (/R:(.*)/.exec(o) || [])[1] }));
 
-check('fetch: POST sends a body and reads the reply',
+await check('fetch: POST sends a body and reads the reply',
   `fetch('${BASE}/echo', { method: 'POST', body: 'payload-1234' })
      .then(r => r.text()).then(t => console.log('R:' + t))
      .catch(e => console.log('R:ERR:' + e.message));`,
   (o) => ({ ok: /R:echo:payload-1234/.test(o), detail: (/R:(.*)/.exec(o) || [])[1] }));
 
-check('fetch: follows a redirect',
+await check('fetch: follows a redirect',
   `fetch('${BASE}/redirect').then(r => r.text()).then(t => console.log('R:' + t))
      .catch(e => console.log('R:ERR:' + e.message));`,
   (o) => ({ ok: /R:hello from the test server/.test(o),
             detail: (/R:(.*)/.exec(o) || [])[1] }));
 
-check('fetch: decodes a chunked response',
+await check('fetch: decodes a chunked response',
   `fetch('${BASE}/chunked').then(r => r.text()).then(t => console.log('R:' + t))
      .catch(e => console.log('R:ERR:' + e.message));`,
   (o) => ({ ok: /R:part-one\|part-two/.test(o), detail: (/R:(.*)/.exec(o) || [])[1] }));
 
-check('fetch: a refused connection rejects BY NAME (MUST-FAIL control)',
+await check('fetch: a refused connection rejects BY NAME (MUST-FAIL control)',
   // Port 1 is reserved and nothing listens there.
   `fetch('http://127.0.0.1:1/nope').then(() => console.log('R:RESOLVED-WRONGLY'))
      .catch(e => console.log('R:REJECTED:' + e.message.slice(0, 60)));`,
   (o) => ({ ok: /R:REJECTED/.test(o) && !/RESOLVED-WRONGLY/.test(o),
             detail: (/R:(.*)/.exec(o) || [])[1] }));
 
-check('fetch: local assets still work alongside remote',
+await check('fetch: local assets still work alongside remote',
   `fetch('./main.js').then(r => r.text()).then(t => console.log('R:local,' + (t.length > 0)))
      .catch(e => console.log('R:ERR:' + e.message));`,
   (o) => ({ ok: /R:local,true/.test(o), detail: (/R:(.*)/.exec(o) || [])[1] }));
 
 /* ------------------------------------------------------------- websocket -- */
 
-check('websocket: connects, sends and receives an echo',
+await check('websocket: connects, sends and receives an echo',
   `const ws = new WebSocket('ws://127.0.0.1:${PORT}/');
    ws.onopen = () => ws.send('ping-42');
    ws.onmessage = (e) => { console.log('R:' + e.data); ws.close(); };
    ws.onerror = (e) => console.log('R:ERR:' + (e.message || 'error'));`,
   (o) => ({ ok: /R:ping-42/.test(o), detail: (/R:(.*)/.exec(o) || [])[1] }));
 
-check('websocket: readyState reaches OPEN',
+await check('websocket: readyState reaches OPEN',
   `const ws = new WebSocket('ws://127.0.0.1:${PORT}/');
    ws.onopen = () => { console.log('R:' + ws.readyState + ',' + WebSocket.OPEN); ws.close(); };`,
   (o) => ({ ok: /R:1,1/.test(o), detail: (/R:(.*)/.exec(o) || [])[1] }));
 
-check('websocket: a message larger than 125 bytes round-trips',
+await check('websocket: a message larger than 125 bytes round-trips',
   // Crosses the 7-bit length boundary into the 16-bit extended form, which is a
   // different code path in both the encoder and the decoder.
   `const big = 'x'.repeat(500);
@@ -195,7 +205,7 @@ check('websocket: a message larger than 125 bytes round-trips',
    ws.onmessage = (e) => { console.log('R:' + (e.data === big ? 'MATCH' : 'MISMATCH:' + e.data.length)); ws.close(); };`,
   (o) => ({ ok: /R:MATCH/.test(o), detail: (/R:(.*)/.exec(o) || [])[1] }));
 
-check('websocket: wss:// without TLS throws BY NAME (MUST-FAIL control)',
+await check('websocket: wss:// without TLS throws BY NAME (MUST-FAIL control)',
   `try { new WebSocket('wss://example.com/'); console.log('R:NO-THROW'); }
    catch (e) { console.log('R:THREW:' + /TLS|tls/.test(e.message)); }`,
   (o) => {
@@ -204,7 +214,7 @@ check('websocket: wss:// without TLS throws BY NAME (MUST-FAIL control)',
     return { ok: /R:THREW:true/.test(o), detail: (/R:(.*)/.exec(o) || [])[1] };
   });
 
-check('websocket: closing leaves no live socket (MUST-FAIL control)',
+await check('websocket: closing leaves no live socket (MUST-FAIL control)',
   `const ws = new WebSocket('ws://127.0.0.1:${PORT}/');
    ws.onopen = () => {
      ws.close();
