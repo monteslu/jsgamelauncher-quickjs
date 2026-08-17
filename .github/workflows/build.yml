@@ -77,7 +77,7 @@ jobs:
       - name: deps (macos)
         if: matrix.platform == 'darwin'
         working-directory: .
-        run: brew install cmake ninja mbedtls
+        run: brew install cmake ninja
 
       - name: build SDL2 from source (macos)
         if: matrix.platform == 'darwin'
@@ -114,6 +114,24 @@ jobs:
             -DSDL2NET_SAMPLES=OFF
           cmake --build sdl2net-build
           cmake --install sdl2net-build
+
+          # mbedTLS 3.6 from source, NOT `brew install mbedtls`: Homebrew ships
+          # 4.2.0, and 4.x REMOVED mbedtls/ctr_drbg.h and mbedtls/entropy.h (the
+          # RNG moved to PSA Crypto) — both of which net_tls.c includes. Verified
+          # against the 4.2.0 and 3.6.2 header listings rather than assumed.
+          # Pinning the source also keeps macOS on the same major version as the
+          # Linux and Windows packages, so there is one API to target.
+          curl -fsSL -o mbedtls.tar.bz2 \
+            https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.2/mbedtls-3.6.2.tar.bz2
+          tar xjf mbedtls.tar.bz2
+          cmake -S mbedtls-3.6.2 -B mbedtls-build -G Ninja \
+            -DCMAKE_C_FLAGS="-g0 -ffile-prefix-map=$PWD=." \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$PWD/sdl2-prefix" \
+            -DENABLE_TESTING=OFF -DENABLE_PROGRAMS=OFF \
+            -DUSE_SHARED_MBEDTLS_LIBRARY=OFF -DUSE_STATIC_MBEDTLS_LIBRARY=ON
+          cmake --build mbedtls-build
+          cmake --install mbedtls-build
           # Prove we got real SDL2, not the compat shim: sdl2-compat exports
           # dllinit/error_dialog, which is what raised the modal dialog.
           if nm -gU "$PWD/sdl2-prefix/lib/libSDL2-2.0.0.dylib" | grep -q "error_dialog"; then
