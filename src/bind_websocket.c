@@ -1,15 +1,12 @@
 /*
- * WebSocket (RFC 6455) over SDL_net.
+ * WebSocket (RFC 6455).
  *
- * SDL_net rather than raw sockets so there is no Winsock/BSD split to maintain:
- * SDLNet_TCP_Open / Send / Recv behave identically on all six targets, and the
- * library is packaged everywhere we build.
+ * Socket I/O goes through the shared stream transport (net_tls.c), which is
+ * plaintext or TLS depending on the scheme — so ws:// and wss:// run the same
+ * frame code, and there is one socket implementation in the project rather than
+ * two that can drift apart.
  *
- * ws:// ONLY. wss:// needs TLS, which would mean vendoring a crypto library and
- * a certificate store; a WebSocket that silently downgraded to plaintext would
- * be far worse than one that refuses, so wss:// throws by name.
- *
- * Threading: each connection owns a thread that blocks in SDLNet_TCP_Recv and
+ * Threading: each connection owns a thread that blocks reading the stream and
  * pushes decoded messages onto a queue. The JS side drains that queue once per
  * frame. Doing it inline instead would either block the frame loop on recv or
  * require a non-blocking state machine for a protocol that is naturally
@@ -17,10 +14,10 @@
  */
 #include "host.h"
 
-#ifdef JSGLQ_HAVE_WEBSOCKET
+#if defined(JSGLQ_HAVE_WEBSOCKET) || defined(JSGLQ_HAVE_TLS)
 
 #include <SDL2/SDL.h>
-#include <SDL2/SDL_net.h>
+#include "net_tls.h" 
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -48,7 +45,8 @@ typedef enum {
 
 typedef struct {
     int          used;
-    TCPsocket    sock;
+    JsglqStream *sock;
+    int          secure;
     SDL_Thread  *thread;
     SDL_mutex   *lock;
     volatile int state;          /* WsState; read by JS, written by the thread */
@@ -61,12 +59,11 @@ typedef struct {
     Msg         *head, *tail;    /* inbound queue, guarded by lock */
 
     /* Outbound frames are written directly from the JS thread under the lock:
-       SDLNet_TCP_Send is blocking, but a send that would block is bounded by
-       the socket buffer and games send small messages. */
+       the send is blocking, but a send that would block is bounded by the
+       socket buffer and games send small messages. */
 } Ws;
 
 static Ws  g_ws[MAX_SOCKETS];
-static int g_net_ready = 0;
 
 /* ------------------------------------------------------------------ base64 -- */
 
@@ -153,7 +150,7 @@ static int ws_send_frame(Ws *w, int opcode, const unsigned char *payload, size_t
 
     int ok = 1;
     SDL_LockMutex(w->lock);
-    if (SDLNet_TCP_Send(w->sock, header, (int)hlen) != (int)hlen) ok = 0;
+    if (jsglq_stream_send(w->sock, header, (int)hlen) != (int)hlen) ok = 0;
     if (ok && len) {
         unsigned char buf[1024];
         size_t sent = 0;
@@ -162,7 +159,7 @@ static int ws_send_frame(Ws *w, int opcode, const unsigned char *payload, size_t
             if (chunk > sizeof(buf)) chunk = sizeof(buf);
             for (size_t i = 0; i < chunk; i++)
                 buf[i] = payload[sent + i] ^ mask[(sent + i) & 3];
-            if (SDLNet_TCP_Send(w->sock, buf, (int)chunk) != (int)chunk) ok = 0;
+            if (jsglq_stream_send(w->sock, buf, (int)chunk) != (int)chunk) ok = 0;
             sent += chunk;
         }
     }
@@ -170,14 +167,18 @@ static int ws_send_frame(Ws *w, int opcode, const unsigned char *payload, size_t
     return ok;
 }
 
-/* Read exactly n bytes, or fail. SDLNet_TCP_Recv returns short reads. */
-static int recv_exact(TCPsocket s, unsigned char *buf, size_t n, volatile int *stop)
+/* Read exactly n bytes, or fail. The stream returns short reads. */
+static int recv_exact(JsglqStream *s, unsigned char *buf, size_t n, volatile int *stop)
 {
     size_t got = 0;
     while (got < n) {
         if (stop && *stop) return 0;
-        int r = SDLNet_TCP_Recv(s, buf + got, (int)(n - got));
-        if (r <= 0) return 0;
+        int r = jsglq_stream_recv(s, buf + got, (int)(n - got));
+        /* -1 is a timeout with the short interval set above, which is normal on
+           an idle connection: go round so the stop flag is re-checked. Only a
+           clean close (0) ends the read. */
+        if (r == 0) return 0;
+        if (r < 0) continue;
         got += (size_t)r;
     }
     return 1;
@@ -210,7 +211,7 @@ static int ws_handshake(Ws *w)
         snprintf(w->err, sizeof(w->err), "request too long");
         return 0;
     }
-    if (SDLNet_TCP_Send(w->sock, req, n) != n) {
+    if (jsglq_stream_send(w->sock, req, n) != n) {
         snprintf(w->err, sizeof(w->err), "failed to send handshake");
         return 0;
     }
@@ -222,7 +223,7 @@ static int ws_handshake(Ws *w)
     size_t len = 0;
     while (len + 1 < sizeof(resp)) {
         if (w->stop) return 0;
-        int r = SDLNet_TCP_Recv(w->sock, resp + len, 1);
+        int r = jsglq_stream_recv(w->sock, resp + len, 1);
         if (r <= 0) { snprintf(w->err, sizeof(w->err), "connection closed during handshake"); return 0; }
         len++;
         if (len >= 4 && memcmp(resp + len - 4, "\r\n\r\n", 4) == 0) break;
@@ -247,25 +248,27 @@ static int ws_thread(void *data)
 {
     Ws *w = (Ws *)data;
 
-    IPaddress ip;
-    if (SDLNet_ResolveHost(&ip, w->host, (Uint16)w->port) < 0) {
-        snprintf(w->err, sizeof(w->err), "cannot resolve %s", w->host);
-        w->state = WS_CLOSED;
-        return 0;
-    }
-    w->sock = SDLNet_TCP_Open(&ip);
+    /* One transport for ws:// and wss://: the stream layer wraps TLS when
+       asked, so the frame code below is identical either way. */
+    w->sock = jsglq_stream_connect(w->host, w->port, w->secure,
+                                   w->err, sizeof(w->err));
     if (!w->sock) {
-        snprintf(w->err, sizeof(w->err), "cannot connect to %s:%d", w->host, w->port);
         w->state = WS_CLOSED;
         return 0;
     }
     if (!ws_handshake(w)) {
-        SDLNet_TCP_Close(w->sock);
+        jsglq_stream_close(w->sock);
         w->sock = NULL;
         w->state = WS_CLOSED;
         return 0;
     }
 
+    /* Short read timeout so the loop below re-checks w->stop often. With the
+       default 30s, close() on a live but idle connection waited the full
+       timeout before the thread noticed — measured at 29987ms, which freezes
+       the game. A timed-out read is not an error here; the loop just goes
+       round again. */
+    jsglq_stream_set_timeout(w->sock, 200);
     w->state = WS_OPEN;
 
     unsigned char *frag = NULL;      /* accumulated continuation payload */
@@ -355,7 +358,7 @@ static int ws_thread(void *data)
     }
 
     free(frag);
-    if (w->sock) { SDLNet_TCP_Close(w->sock); w->sock = NULL; }
+    if (w->sock) { jsglq_stream_close(w->sock); w->sock = NULL; }
     w->state = WS_CLOSED;
     return 0;
 }
@@ -372,13 +375,7 @@ static JSValue js_ws_connect(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
     (void)this_val;
-    if (argc < 3) return jsglq_throw(ctx, "wsConnect(host, port, path)");
-
-    if (!g_net_ready) {
-        if (SDLNet_Init() < 0)
-            return jsglq_throw(ctx, "SDLNet_Init failed: %s", SDLNet_GetError());
-        g_net_ready = 1;
-    }
+    if (argc < 4) return jsglq_throw(ctx, "wsConnect(host, port, path, secure)");
 
     int slot = slot_alloc();
     if (slot < 0) return jsglq_throw(ctx, "too many open WebSockets (max %d)", MAX_SOCKETS);
@@ -397,6 +394,7 @@ static JSValue js_ws_connect(JSContext *ctx, JSValueConst this_val,
     w->port  = port;
     snprintf(w->host, sizeof(w->host), "%s", host);
     snprintf(w->path, sizeof(w->path), "%s", path);
+    w->secure = JS_ToBool(ctx, argv[3]);
     JS_FreeCString(ctx, host);
     JS_FreeCString(ctx, path);
 
@@ -514,9 +512,10 @@ static JSValue js_ws_close(JSContext *ctx, JSValueConst this_val,
         ws_send_frame(w, 0x8, NULL, 0);
     }
     w->stop = 1;
-    /* Closing the socket unblocks the thread's recv, which is otherwise parked
-       until the peer says something. */
-    if (w->sock) SDLNet_TCP_Close(w->sock);
+    /* The THREAD owns the socket's lifetime and closes it on the way out.
+       Closing it here too raced with that and double-freed the stream. The
+       reader does not park forever: its recv carries a timeout and the loop
+       re-checks w->stop, so setting the flag is enough to end it. */
     if (w->thread) { SDL_WaitThread(w->thread, NULL); w->thread = NULL; }
     queue_clear(w);
     if (w->lock) { SDL_DestroyMutex(w->lock); w->lock = NULL; }
@@ -532,13 +531,12 @@ void jsglq_websocket_shutdown(void)
         Ws *w = &g_ws[i];
         if (!w->used) continue;
         w->stop = 1;
-        if (w->sock) SDLNet_TCP_Close(w->sock);
+        /* Same ownership rule as js_ws_close: the thread closes the socket. */
         if (w->thread) { SDL_WaitThread(w->thread, NULL); w->thread = NULL; }
         queue_clear(w);
         if (w->lock) { SDL_DestroyMutex(w->lock); w->lock = NULL; }
         w->used = 0;
     }
-    if (g_net_ready) { SDLNet_Quit(); g_net_ready = 0; }
 }
 
 int jsglq_bind_websocket(JsglqEngine *e)
@@ -547,12 +545,13 @@ int jsglq_bind_websocket(JsglqEngine *e)
     JSValue global = JS_GetGlobalObject(ctx);
 
     JSValue w = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, w, "connect", JS_NewCFunction(ctx, js_ws_connect, "connect", 3));
+    JS_SetPropertyStr(ctx, w, "connect", JS_NewCFunction(ctx, js_ws_connect, "connect", 4));
     JS_SetPropertyStr(ctx, w, "state",   JS_NewCFunction(ctx, js_ws_state, "state", 1));
     JS_SetPropertyStr(ctx, w, "error",   JS_NewCFunction(ctx, js_ws_error, "error", 1));
     JS_SetPropertyStr(ctx, w, "recv",    JS_NewCFunction(ctx, js_ws_recv, "recv", 1));
     JS_SetPropertyStr(ctx, w, "send",    JS_NewCFunction(ctx, js_ws_send, "send", 2));
     JS_SetPropertyStr(ctx, w, "close",   JS_NewCFunction(ctx, js_ws_close, "close", 1));
+    JS_SetPropertyStr(ctx, w, "tls", JS_NewBool(ctx, jsglq_tls_available()));
     JS_SetPropertyStr(ctx, global, "__jsglq_ws", w);
 
     JS_FreeValue(ctx, global);

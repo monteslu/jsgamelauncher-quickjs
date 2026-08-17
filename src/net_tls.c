@@ -23,6 +23,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 #ifdef JSGLQ_HAVE_TLS
 #include <mbedtls/ssl.h>
@@ -35,6 +36,7 @@
 
 struct JsglqStream {
     int secure;
+    int recv_timeout_ms;
 
 #ifdef JSGLQ_HAVE_TLS
     mbedtls_net_context      net;
@@ -94,6 +96,7 @@ JsglqStream *jsglq_stream_connect(const char *host, int port, int secure,
         JsglqStream *s = (JsglqStream *)calloc(1, sizeof(JsglqStream));
         if (!s) { snprintf(err, errlen, "out of memory"); return NULL; }
         s->secure = 1;
+        s->recv_timeout_ms = 30000;
 
         mbedtls_net_init(&s->net);
         mbedtls_ssl_init(&s->ssl);
@@ -190,6 +193,7 @@ JsglqStream *jsglq_stream_connect(const char *host, int port, int secure,
     JsglqStream *s = (JsglqStream *)calloc(1, sizeof(JsglqStream));
     if (!s) { snprintf(err, errlen, "out of memory"); return NULL; }
     s->secure = 0;
+    s->recv_timeout_ms = 30000;
     mbedtls_net_init(&s->net);
 
     char portstr[16];
@@ -201,6 +205,11 @@ JsglqStream *jsglq_stream_connect(const char *host, int port, int secure,
     }
     return s;
 #endif
+}
+
+void jsglq_stream_set_timeout(JsglqStream *s, int ms)
+{
+    if (s && ms > 0) s->recv_timeout_ms = ms;
 }
 
 int jsglq_stream_send(JsglqStream *s, const void *data, int len)
@@ -257,7 +266,8 @@ int jsglq_stream_recv(JsglqStream *s, void *buf, int len)
            rather than waiting for the full buffer, which is what an HTTP header
            reader and a WebSocket frame reader both need. */
         int rc = mbedtls_net_recv_timeout(&s->net, (unsigned char *)buf,
-                                          (size_t)len, 30000);
+                                          (size_t)len,
+                                          (uint32_t)s->recv_timeout_ms);
         if (rc == MBEDTLS_ERR_SSL_TIMEOUT) return -1;
         if (rc == MBEDTLS_ERR_SSL_WANT_READ) return 0;
         return rc < 0 ? -1 : rc;

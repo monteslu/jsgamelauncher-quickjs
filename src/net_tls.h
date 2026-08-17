@@ -20,6 +20,12 @@ typedef struct JsglqStream JsglqStream;
 JsglqStream *jsglq_stream_connect(const char *host, int port, int secure,
                                   char *err, size_t errlen);
 
+/* Set the read timeout in milliseconds. The default is long (a stalled server
+   should eventually fail), but a caller that must stay responsive to a stop
+   flag — a WebSocket reader waiting on an idle connection — needs a short one
+   so its loop can re-check. */
+void jsglq_stream_set_timeout(JsglqStream *s, int ms);
+
 /* Returns bytes transferred, or -1. send() writes all of `len` or fails. */
 int  jsglq_stream_send(JsglqStream *s, const void *data, int len);
 /* Returns bytes read, 0 at clean end of stream, -1 on error. */

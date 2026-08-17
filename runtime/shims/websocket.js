@@ -7,9 +7,11 @@
  * the host's inbound queue, which is why installWebSocket returns a pump that
  * bootstrap calls once per frame.
  *
- * ws:// only. wss:// throws by name rather than connecting in plaintext or
- * failing obscurely — a game that thinks it has TLS and does not is a worse
- * outcome than one that is told the runtime cannot do it.
+ * ws:// and wss:// both work; they share the host's stream transport, which
+ * wraps TLS when the scheme asks for it. A build without mbedTLS reports
+ * host.tls === false and wss:// throws by name rather than connecting in
+ * plaintext — a game that thinks it has TLS and does not is a worse outcome
+ * than one told the runtime cannot do it.
  */
 
 const CONNECTING = 0, OPEN = 1, CLOSING = 2, CLOSED = 3;
@@ -40,18 +42,19 @@ export function installWebSocket(g) {
       if (!m) throw new SyntaxError(`WebSocket: invalid URL '${this.url}'`);
 
       const scheme = m[1].toLowerCase();
-      if (scheme === 'wss') {
+      const secure = scheme === 'wss';
+      if (secure && !host.tls) {
         throw new Error(
-          `WebSocket: wss:// requires TLS, which this runtime does not include ` +
-          `(${this.url}). Use ws:// on a trusted network, or run the game on ` +
-          `jsgamelauncher, which has full TLS.`);
+          `WebSocket: wss:// requires TLS, which this build does not include ` +
+          `(${this.url}). Use ws:// or rebuild with mbedTLS.`);
       }
 
       const hostname = m[2];
-      const port = m[3] ? parseInt(m[3], 10) : 80;
+      // Default port follows the scheme, as it does in a browser.
+      const port = m[3] ? parseInt(m[3], 10) : (secure ? 443 : 80);
       const path = m[4] && m[4].length ? m[4] : '/';
 
-      this._id = host.connect(hostname, port, path);
+      this._id = host.connect(hostname, port, path, secure);
       live.add(this);
       if (protocols) {
         // Subprotocol negotiation is not implemented; the server's choice is
