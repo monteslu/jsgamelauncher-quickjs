@@ -359,6 +359,40 @@ check('audio: gain scales the signal by the value set',
     return { ok: Math.abs(v - 0.1768) < 0.02, detail: `${v} (expect ~0.177)` };
   });
 
+check('audio: a default PannerNode does not emit NaN (MUST-FAIL control)',
+  `const ac=new AudioContext(); const h=globalThis.__jsglq_audio;
+   const osc=ac.createOscillator(); const p=ac.createPanner();
+   osc.connect(p); p.connect(ac.destination); osc.start(0);
+   const out=h.renderOffline(44100,2,2048);
+   // One NaN anywhere poisons every downstream node, so check every sample
+   // rather than an average that a single NaN would hide as NaN anyway.
+   let nan=0; for(const v of out) if(!Number.isFinite(v)) nan++;
+   console.log('R:'+nan+','+out.length);`,
+  (o) => {
+    const m = /R:(\d+),(\d+)/.exec(o);
+    if (!m) return { ok: false, detail: 'no output' };
+    return { ok: Number(m[1]) === 0,
+             detail: `${m[1]} non-finite of ${m[2]} samples` };
+  });
+
+check('audio: panner distance actually attenuates',
+  `const ac=new AudioContext(); const h=globalThis.__jsglq_audio;
+   const rms=a=>{let s=0;for(const v of a)s+=v*v;return Math.sqrt(s/a.length);};
+   const osc=ac.createOscillator(); osc.frequency.value=440;
+   const p=ac.createPanner();
+   osc.connect(p); p.connect(ac.destination); osc.start(0);
+   const near=rms(h.renderOffline(44100,2,4096));
+   p.positionZ.value=100;
+   const far=rms(h.renderOffline(44100,2,4096));
+   console.log('R:'+near.toFixed(4)+','+far.toFixed(4));`,
+  (o) => {
+    const m = /R:([\d.]+),([\d.]+)/.exec(o);
+    if (!m) return { ok: false, detail: 'no output' };
+    const [, near, far] = m.map(Number);
+    return { ok: near > 0.1 && far < near * 0.5,
+             detail: `near ${near}, far ${far}` };
+  });
+
 check('audio: every node type the engine implements is reachable and real',
   `const ac=new AudioContext();
    const fns=['createGain','createOscillator','createBufferSource','createBiquadFilter',
