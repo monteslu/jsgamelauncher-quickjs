@@ -158,6 +158,22 @@ export function installImage(g) {
   };
 
   g.Image = HTMLImageElement;
+
+  /*
+   * loadImage(url) -> Promise<Image>
+   *
+   * Not a browser API — it is a jsgamelauncher convenience that games written
+   * for that launcher use, so it exists here for source compatibility. Rejects
+   * rather than resolving with a broken image, because a game awaiting this and
+   * then drawing an unloaded image gets nothing on screen and no error.
+   */
+  g.loadImage = (url) => new Promise((resolve, reject) => {
+    const img = new HTMLImageElement();
+    img.onload = () => resolve(img);
+    img.onerror = (e) => reject(
+      e instanceof Error ? e : new Error(`loadImage: failed to load ${url}`));
+    img.src = url;
+  });
   g.HTMLImageElement = HTMLImageElement;
   g.ImageBitmap = ImageBitmap;
 

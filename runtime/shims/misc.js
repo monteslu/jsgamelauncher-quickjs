@@ -173,6 +173,85 @@ export function installMisc(g) {
   g.URL.revokeObjectURL = (id) => { objectUrls.delete(id); };
   g.__jsglq_resolveObjectURL = (id) => objectUrls.get(id) || null;
 
+  /* ------------------------------------------------------------ FileReader --- */
+
+  /*
+   * FileReader over Blob.
+   *
+   * Games reach for this to turn a Blob (usually from a fetch or a generated
+   * canvas) into a data URL or ArrayBuffer. The callbacks fire ASYNCHRONOUSLY,
+   * as in a browser: code commonly assigns .onload AFTER calling readAsX(), and
+   * a synchronous implementation would fire before the handler is attached and
+   * silently never call it.
+   */
+  if (typeof g.FileReader === 'undefined') {
+    g.FileReader = class FileReader {
+      constructor() {
+        this.result = null;
+        this.error = null;
+        this.readyState = 0;         // EMPTY
+        this.onload = null;
+        this.onloadend = null;
+        this.onerror = null;
+        this.onprogress = null;
+      }
+
+      _finish(result, err) {
+        this.readyState = 2;         // DONE
+        this.result = result;
+        this.error = err || null;
+        const ev = { target: this, type: err ? 'error' : 'load' };
+        g.setTimeout(() => {
+          try {
+            if (err) { if (this.onerror) this.onerror(ev); }
+            else if (this.onload) this.onload(ev);
+            if (this.onloadend) this.onloadend({ target: this, type: 'loadend' });
+          } catch (e) {
+            // A throw inside a user handler must not be swallowed: it would look
+            // exactly like the read never completing.
+            g.__jsglq_reportError ? g.__jsglq_reportError(e) : console.error(e);
+          }
+        }, 0);
+      }
+
+      _bytes(blob) {
+        if (blob && blob._u8) return blob._u8;
+        if (blob instanceof Uint8Array) return blob;
+        if (blob instanceof ArrayBuffer) return new Uint8Array(blob);
+        return null;
+      }
+
+      readAsArrayBuffer(blob) {
+        const u8 = this._bytes(blob);
+        if (!u8) return this._finish(null, new TypeError('FileReader: not a Blob'));
+        this.readyState = 1;
+        this._finish(u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength));
+      }
+
+      readAsText(blob) {
+        const u8 = this._bytes(blob);
+        if (!u8) return this._finish(null, new TypeError('FileReader: not a Blob'));
+        this.readyState = 1;
+        this._finish(new g.TextDecoder().decode(u8));
+      }
+
+      readAsDataURL(blob) {
+        const u8 = this._bytes(blob);
+        if (!u8) return this._finish(null, new TypeError('FileReader: not a Blob'));
+        this.readyState = 1;
+        let bin = '';
+        for (let i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
+        const type = (blob && blob.type) || 'application/octet-stream';
+        this._finish(`data:${type};base64,${g.btoa(bin)}`);
+      }
+
+      abort() { this.readyState = 2; }
+    };
+    g.FileReader.EMPTY = 0;
+    g.FileReader.LOADING = 1;
+    g.FileReader.DONE = 2;
+  }
+
   if (typeof g.URLSearchParams === 'undefined') {
     g.URLSearchParams = class URLSearchParams {
       constructor(init = '') {

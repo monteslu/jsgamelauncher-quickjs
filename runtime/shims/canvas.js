@@ -288,11 +288,43 @@ export function installCanvas(g, { width, height }) {
       throw new TypeError('Illegal constructor');
     };
   }
+  // The context this runtime actually hands out is WebGL2. Libraries branch on
+  // `typeof WebGL2RenderingContext !== 'undefined'` to pick their WebGL2 path,
+  // and without the global they silently fall back to the WebGL1 path — working,
+  // but slower and without the features the runtime does support.
+  if (!g.WebGL2RenderingContext) {
+    g.WebGL2RenderingContext = function WebGL2RenderingContext() {
+      throw new TypeError('Illegal constructor');
+    };
+  }
   g.__jsglq_createCanvas = (w, h) => {
     const c = new HTMLCanvasElement(w | 0, h | 0, false);
     g.__jsglq_allCanvases.push(c);
     return c;
   };
+
+  /*
+   * OffscreenCanvas.
+   *
+   * Backed by the same offscreen canvas document.createElement('canvas')
+   * returns, which is what jsgamelauncher does too. It is not transferable to a
+   * Worker here (the GL context and the 2D backing store live on the main
+   * thread), so transferControlToOffscreen is deliberately absent rather than
+   * present and broken.
+   */
+  if (!g.OffscreenCanvas) {
+    g.OffscreenCanvas = class OffscreenCanvas {
+      constructor(width, height) {
+        const c = g.__jsglq_createCanvas(width | 0, height | 0);
+        // convertToBlob is the one OffscreenCanvas-specific method games reach
+        // for; name it rather than letting it be a silent undefined.
+        c.convertToBlob = () => {
+          throw new Error('OffscreenCanvas.convertToBlob is not implemented');
+        };
+        return c;
+      }
+    };
+  }
   g.__jsglq_displayCanvas = displayCanvas;
 
   return displayCanvas;

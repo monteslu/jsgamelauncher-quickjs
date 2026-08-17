@@ -20,6 +20,7 @@ import { installAudio } from './shims/audio.js';
 import { installStorage } from './shims/storage.js';
 import { installXHR } from './shims/xhr.js';
 import { installGamepads } from './shims/gamepad.js';
+import { installPath2D } from './shims/path2d.js';
 
 export function bootstrap({ width, height }) {
   installMisc(globalThis);
@@ -34,6 +35,7 @@ export function bootstrap({ width, height }) {
   /* After installDocument (which creates navigator) and installEvents (which
      provides Event + dispatchEvent for gamepadconnected). */
   installGamepads(globalThis);
+  installPath2D(globalThis);
   if (globalThis.__jsglq_worker) installWorker(globalThis);
   if (globalThis.__jsglq_audio) installAudio(globalThis);
   return canvas;
