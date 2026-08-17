@@ -290,6 +290,7 @@ add_executable(jsglq
   src/bind_gamepad.c
   src/bind_websocket.c
   src/net_tls.c
+  src/bind_http.c
   src/bundle.c
   src/sprite2d.c
   src/bind_gl.cpp

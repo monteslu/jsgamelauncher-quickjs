@@ -106,22 +106,70 @@ export function installFetch(g) {
     }
   }
 
+  /*
+   * Remote request over the host's HTTP client.
+   *
+   * The host runs it on a worker thread and this polls for completion, so a
+   * slow server cannot stall the frame loop. Local (game-directory) requests
+   * still take the synchronous asset path below — they are a file read, and
+   * making them async would change load ordering for every existing game.
+   */
+  function fetchRemote(url, init, method) {
+    const http = g.__jsglq_http;
+    if (!http) {
+      throw new TypeError(
+        `fetch: remote URLs are not available in this build (${url})`);
+    }
+    if (/^https:/i.test(url) && !http.tls) {
+      throw new TypeError(
+        `fetch: https:// requires TLS, which this build does not include (${url}). ` +
+        'Use http:// or rebuild with mbedTLS.');
+    }
+
+    let headerBlock = '';
+    const h = (init && init.headers) || {};
+    const entries = h instanceof Headers ? [...h.entries()] : Object.entries(h);
+    for (const [k, v] of entries) headerBlock += `${k}: ${v}\r\n`;
+
+    const id = http.start(method, url, headerBlock, init && init.body);
+
+    return new Promise((resolve, reject) => {
+      const tick = () => {
+        const r = http.poll(id);
+        if (r === null) { g.setTimeout(tick, 4); return; }
+        if (!r.ok) { reject(new TypeError(`fetch: ${r.error}`)); return; }
+
+        // Parse the raw header block into a Headers object.
+        const hdrs = {};
+        for (const line of String(r.headers).split('\r\n').slice(1)) {
+          const i = line.indexOf(':');
+          if (i > 0) hdrs[line.slice(0, i).trim().toLowerCase()] = line.slice(i + 1).trim();
+        }
+        resolve(new Response(new Uint8Array(r.body), {
+          status: r.status,
+          statusText: r.statusText,
+          url,
+          headers: hdrs,
+        }));
+      };
+      tick();
+    });
+  }
+
   async function fetchImpl(input, init = {}) {
     const url = typeof input === 'string' ? input : (input && input.url) || String(input);
     const method = ((init && init.method) || 'GET').toUpperCase();
 
-    if (method !== 'GET' && method !== 'HEAD') {
-      // Honest failure: there is no network in v1, and pretending a POST succeeded
-      // would be worse than saying so.
-      throw new TypeError(
-        `fetch: only GET/HEAD are supported (got ${method}); ` +
-        'network requests are not available in this runtime');
+    if (/^https?:\/\//i.test(url)) {
+      return fetchRemote(url, init, method);
     }
 
-    if (/^https?:\/\//i.test(url)) {
+    if (method !== 'GET' && method !== 'HEAD') {
+      // A non-GET against the game's own directory has nowhere to go: assets are
+      // read-only. Say so rather than appearing to succeed.
       throw new TypeError(
-        `fetch: remote URLs are not supported in this runtime (${url}); ` +
-        'games load assets from their own directory');
+        `fetch: ${method} is not supported for local assets (${url}); ` +
+        'only GET/HEAD read from the game directory');
     }
 
     const path = normalize(url);
