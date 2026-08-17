@@ -161,14 +161,20 @@ every attribution requirement.
 | area | state |
 |---|---|
 | WebGL2 | 247 entry points; three.js r183 renders (PBR, instancing, skinning, shadows) |
-| Canvas 2D | rects, text, images, transforms, and the full path API |
+| Canvas 2D | rects, text, images, transforms, the full path API, `Path2D`, `OffscreenCanvas` |
 | Input | keyboard (real `KeyboardEvent.code`), mouse, pointer, wheel, gamepad (SDL_GameControllerDB, ~2200 devices, rumble) |
-| Audio | mp3/wav/flac/ogg decode, all 15 Web Audio node types (incl. 3D panner, convolver, compressor), `<audio>`, **~12 ms latency** |
+| Audio | mp3/wav/flac/ogg decode, all 15 Web Audio node types (3D panner, convolver, compressor, IIR, `PeriodicWave`), `OfflineAudioContext`, `<audio>`, **~12 ms latency** |
 | Workers | real OS threads, **2.5–3.4× measured speedup** |
 | Storage | `localStorage` persists to disk; `sessionStorage` separate |
 | Networking | `fetch`/`XHR` (local assets **and** `http://`/`https://` with verified TLS), `WebSocket` (`ws://`, `wss://`) |
 
-**Not supported:** WebAssembly (deferred — WAMR trails V8 at wasm by more than
+**Parity with [jsgamelauncher](https://github.com/monteslu/jsgamelauncher):** every
+browser global it exposes is present here except `Video` (no video decoder is
+bundled). That includes the Gamepad API, all 15 Web Audio node types,
+`OfflineAudioContext`, `PeriodicWave`, `Path2D`, `OffscreenCanvas`, `FileReader`,
+`WebSocket` and networked `fetch`/`XHR`.
+
+**Not supported:** `Video`, and WebAssembly (deferred — WAMR trails V8 at wasm by more than
 QuickJS trails V8 at JS, so wasm games get a better experience on jsgamelauncher),
 video playback, gradients, and patterns. Unimplemented Canvas methods **throw with
 their own name** rather than silently doing nothing.
