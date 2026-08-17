@@ -46,6 +46,7 @@ extern void  stopNode(int graph_id, int node_id, double when);
 extern int   registerBuffer(int graph_id, float *data, int length, int channels, int sample_rate);
 extern void  setNodeBufferId(int graph_id, int node_id, int buffer_id);
 extern void  setWaveShaperCurve(int graph_id, int node_id, float *curve, int len);
+extern void  setNodePeriodicWave(int graph_id, int node_id, float *wavetable, int size);
 extern void  setWaveShaperOversample(int graph_id, int node_id, const char *mode);
 extern void  setIIRFilterCoefficients(int graph_id, int node_id,
                                       float *feedforward, int ff_len,
@@ -331,6 +332,22 @@ static JSValue js_set_waveshaper_oversample(JSContext *ctx, JSValueConst this_va
     return JS_UNDEFINED;
 }
 
+static JSValue js_set_periodic_wave(JSContext *ctx, JSValueConst this_val,
+                                    int argc, JSValueConst *argv)
+{
+    if (!g_audio.running) return jsglq_throw(ctx, "audio not initialized");
+    if (argc < 2) return jsglq_throw(ctx, "setPeriodicWave(node, Float32Array)");
+    int32_t node = 0;
+    JS_ToInt32(ctx, &node, argv[0]);
+
+    int len = 0;
+    float *data = float32_data(ctx, argv[1], &len);
+    if (!data) return jsglq_throw(ctx, "setPeriodicWave: wavetable must be a Float32Array");
+    if (len <= 0) return jsglq_throw(ctx, "setPeriodicWave: wavetable is empty");
+    WITH_GRAPH_LOCK({ setNodePeriodicWave(g_audio.graph, node, data, len); });
+    return JS_UNDEFINED;
+}
+
 static JSValue js_set_iir_coefficients(JSContext *ctx, JSValueConst this_val,
                                        int argc, JSValueConst *argv)
 {
@@ -490,6 +507,8 @@ int jsglq_bind_audio(JsglqEngine *e)
         JS_NewCFunction(ctx, js_set_waveshaper_curve, "setWaveShaperCurve", 2));
     JS_SetPropertyStr(ctx, a, "setWaveShaperOversample",
         JS_NewCFunction(ctx, js_set_waveshaper_oversample, "setWaveShaperOversample", 2));
+    JS_SetPropertyStr(ctx, a, "setPeriodicWave",
+        JS_NewCFunction(ctx, js_set_periodic_wave, "setPeriodicWave", 2));
     JS_SetPropertyStr(ctx, a, "setIIRCoefficients",
         JS_NewCFunction(ctx, js_set_iir_coefficients, "setIIRCoefficients", 3));
     JS_SetPropertyStr(ctx, a, "renderOffline",

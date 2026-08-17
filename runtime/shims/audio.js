@@ -121,9 +121,12 @@ export function installAudio(g) {
     }
     start(when = 0) { host.startNode(this._id, when); }
     stop(when = 0) { host.stopNode(this._id, when); }
-    setPeriodicWave() {
-      throw new Error('setPeriodicWave is not implemented (the engine stubs ' +
-                      'setNodePeriodicWave). Use a standard oscillator type.');
+    setPeriodicWave(wave) {
+      if (!wave || !wave._table) {
+        throw new TypeError('setPeriodicWave: expected a PeriodicWave');
+      }
+      host.setPeriodicWave(this._id, wave._table);
+      this._type = 'custom';   // per the spec, once a periodic wave is set
     }
   }
 
@@ -336,6 +339,44 @@ export function installAudio(g) {
     }
   }
 
+  /*
+   * PeriodicWave.
+   *
+   * The spec describes a custom waveform as Fourier coefficients (real/imag
+   * arrays of harmonic amplitudes); the engine wants a wavetable of SAMPLES. The
+   * synthesis happens here, once at construction, rather than per sample in the
+   * audio thread.
+   */
+  class PeriodicWave {
+    constructor(ctx, options = {}) {
+      const real = options.real ? Float32Array.from(options.real) : new Float32Array([0, 0]);
+      const imag = options.imag ? Float32Array.from(options.imag) : new Float32Array([0, 1]);
+      const n = Math.max(real.length, imag.length);
+
+      const SIZE = 2048;   // one cycle; the oscillator interpolates within it
+      const table = new Float32Array(SIZE);
+      for (let i = 0; i < SIZE; i++) {
+        const phase = (2 * Math.PI * i) / SIZE;
+        let v = 0;
+        // Harmonic 0 is DC and is excluded by the spec.
+        for (let h = 1; h < n; h++) {
+          const a = real[h] ?? 0, b = imag[h] ?? 0;
+          v += a * Math.cos(h * phase) + b * Math.sin(h * phase);
+        }
+        table[i] = v;
+      }
+
+      // Normalize unless asked not to, which is the spec default: otherwise a
+      // wave with many harmonics clips as soon as it is played.
+      if (!options.disableNormalization) {
+        let peak = 0;
+        for (const v of table) peak = Math.max(peak, Math.abs(v));
+        if (peak > 0) for (let i = 0; i < SIZE; i++) table[i] /= peak;
+      }
+      this._table = table;
+    }
+  }
+
   class AudioDestinationNode extends AudioNode {
     constructor(ctx) {
       // The engine allocates its destination from next_id, which starts at 1 —
@@ -362,6 +403,9 @@ export function installAudio(g) {
     createStereoPanner() { return new StereoPannerNode(this); }
     createDelay() { return new DelayNode(this); }
     createAnalyser() { return new AnalyserNode(this); }
+    createPeriodicWave(real, imag, opts) {
+      return new PeriodicWave(this, { real, imag, ...(opts || {}) });
+    }
     createWaveShaper() { return new WaveShaperNode(this); }
     createConvolver() { return new ConvolverNode(this); }
     createDynamicsCompressor() { return new DynamicsCompressorNode(this); }
@@ -477,6 +521,7 @@ export function installAudio(g) {
   g.DelayNode = DelayNode;
   g.AnalyserNode = AnalyserNode;
   g.AudioDestinationNode = AudioDestinationNode;
+  g.PeriodicWave = PeriodicWave;
   // The remaining node types. Libraries construct these directly
   // (`new ConvolverNode(ctx)`) and feature-detect them by name, so exposing only
   // the ctx.createX() factories leaves both of those paths broken.
