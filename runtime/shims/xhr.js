@@ -89,17 +89,103 @@ export function installXHR(g) {
       this._fire('readystatechange');
     }
 
-    send() {
+    _sendRemote() {
+      const http = g.__jsglq_http;
+      if (!http) {
+        this._failRemote(`XHR: remote URLs are not available in this build`);
+        return;
+      }
+      if (/^https:/i.test(this._url) && !http.tls) {
+        this._failRemote(
+          `XHR: https:// requires TLS, which this build does not include`);
+        return;
+      }
+
+      let headerBlock = '';
+      for (const [k, v] of Object.entries(this._headers || {})) {
+        headerBlock += `${k}: ${v}\r\n`;
+      }
+
+      let id;
+      try {
+        id = http.start(this._method, this._url, headerBlock, this._body);
+      } catch (e) {
+        this._failRemote(`XHR: ${e.message}`);
+        return;
+      }
+
+      const tick = () => {
+        const r = http.poll(id);
+        if (r === null) { g.setTimeout(tick, 4); return; }
+        if (!r.ok) { this._failRemote(`XHR: ${r.error}`); return; }
+
+        const hdrs = {};
+        for (const line of String(r.headers).split('\r\n').slice(1)) {
+          const i = line.indexOf(':');
+          if (i > 0) hdrs[line.slice(0, i).trim().toLowerCase()] = line.slice(i + 1).trim();
+        }
+        const buf = r.body;
+        this.responseURL = this._url;
+        this.status = r.status;
+        this.statusText = r.statusText || '';
+        this._respHeaders = hdrs;
+        this._len = buf.byteLength;
+        this.readyState = DONE;
+        // Same decoding the local path uses, per responseType.
+        const t = this.responseType;
+        if (t === 'arraybuffer') {
+          this.response = buf;
+        } else if (t === 'blob') {
+          this.response = new g.Blob([buf]);
+        } else if (t === 'json') {
+          this.responseText = new g.TextDecoder().decode(new Uint8Array(buf));
+          try { this.response = JSON.parse(this.responseText); }
+          catch { this.response = null; }
+        } else {
+          this.responseText = new g.TextDecoder().decode(new Uint8Array(buf));
+          this.response = this.responseText;
+        }
+        this._emitReadyState();
+        this._fire('load');
+        this._fire('loadend');
+      };
+      tick();
+    }
+
+    _failRemote(message) {
+      this.status = 0;
+      this.statusText = '';
+      this.readyState = DONE;
+      this.response = null;
+      this.responseText = '';
+      this._respHeaders = {};
+      this._emitReadyState();
+      // A network failure is an error EVENT, not a throw: that is what XHR
+      // callers handle, and throwing here would escape into the microtask.
+      this._error = new Error(message);
+      this._fire('error');
+      this._fire('loadend');
+    }
+
+    send(body) {
+      // Remote requests can carry a body (POST); the local asset path ignores it.
+      this._body = body;
       // Deliver asynchronously: a caller that assigns onload AFTER send() must
       // still receive it, which is how essentially all XHR code is written.
       Promise.resolve().then(() => {
         if (this.readyState === UNSENT) return;   // aborted
         try {
-          if (this._method !== 'GET' && this._method !== 'HEAD') {
-            throw new Error(`XHR: only GET/HEAD are supported (got ${this._method})`);
-          }
+          /* Remote URLs go through the same HTTP client fetch() uses, so the
+             two cannot diverge in what they support. Local requests keep the
+             synchronous asset path below. */
           if (/^https?:\/\//i.test(this._url)) {
-            throw new Error(`XHR: remote URLs are not supported (${this._url})`);
+            this._sendRemote();
+            return;
+          }
+          if (this._method !== 'GET' && this._method !== 'HEAD') {
+            throw new Error(
+              `XHR: ${this._method} is not supported for local assets ` +
+              `(${this._url}); only GET/HEAD read from the game directory`);
           }
 
           let path = this._url;

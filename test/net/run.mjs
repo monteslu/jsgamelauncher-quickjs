@@ -182,6 +182,31 @@ await check('fetch: local assets still work alongside remote',
      .catch(e => console.log('R:ERR:' + e.message));`,
   (o) => ({ ok: /R:local,true/.test(o), detail: (/R:(.*)/.exec(o) || [])[1] }));
 
+await check('xhr: remote GET works and shares fetch\'s HTTP client',
+  `const x=new XMLHttpRequest();
+   x.open('GET','${BASE}/hello');
+   x.onload=()=>console.log('R:'+x.status+','+x.responseText);
+   x.onerror=()=>console.log('R:ERROR');
+   x.send();`,
+  (o) => ({ ok: /R:200,hello from the test server/.test(o),
+            detail: (/R:(.*)/.exec(o) || [])[1] }));
+
+await check('xhr: POST sends a body',
+  `const x=new XMLHttpRequest();
+   x.open('POST','${BASE}/echo');
+   x.onload=()=>console.log('R:'+x.responseText);
+   x.onerror=()=>console.log('R:ERROR');
+   x.send('xhr-body-99');`,
+  (o) => ({ ok: /R:echo:xhr-body-99/.test(o), detail: (/R:(.*)/.exec(o) || [])[1] }));
+
+await check('xhr: a refused connection fires error, not a throw (MUST-FAIL control)',
+  `const x=new XMLHttpRequest();
+   x.open('GET','http://127.0.0.1:1/nope');
+   x.onload=()=>console.log('R:LOADED-WRONGLY');
+   x.onerror=()=>console.log('R:ERROR-EVENT,status='+x.status);
+   x.send();`,
+  (o) => ({ ok: /R:ERROR-EVENT,status=0/.test(o), detail: (/R:(.*)/.exec(o) || [])[1] }));
+
 /* ------------------------------------------------------------- websocket -- */
 
 await check('websocket: connects, sends and receives an echo',
