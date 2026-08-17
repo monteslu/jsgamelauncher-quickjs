@@ -408,9 +408,16 @@ jobs:
         with: { repository: monteslu/webaudio-node, path: webaudio-node }
       - run: |
           sudo apt-get update
-          sudo apt-get install -y cmake libsdl2-dev libegl-dev libgles-dev xvfb
+          sudo apt-get install -y cmake libsdl2-dev libsdl2-net-dev libmbedtls-dev \
+                                  libegl-dev libgles-dev xvfb
       - run: node scripts/fetch-deps.mjs
       - run: cmake -S . -B build-cmake -DCMAKE_BUILD_TYPE=Release && cmake --build build-cmake -j
       # The must-fail controls run here too: if one ever passes, the harness is
       # broken and every number it has produced is void.
+      # SDL_AUDIODRIVER=dummy: the runner has no sound card, but the audio
+      # tests render OFFLINE and do not need one — the dummy driver lets them
+      # actually run instead of reporting NO-DEVICE and asserting nothing about
+      # the DSP.
       - run: xvfb-run -a node test/regression/run.mjs
+        env:
+          SDL_AUDIODRIVER: dummy

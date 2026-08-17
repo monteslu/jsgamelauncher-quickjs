@@ -54,6 +54,23 @@ if(UNIX AND NOT APPLE)
   # Optional: a build without it simply has no WebSocket, which the runtime
   # reports honestly rather than pretending to connect.
   pkg_check_modules(SDL2_NET sdl2_net)
+  # mbedTLS for https:// and wss://. Optional in the same way SDL_net is: without
+  # it the build still works, TLS URLs throw by name, and nothing pretends to be
+  # encrypted.
+  pkg_check_modules(MBEDTLS mbedtls)
+  if(NOT MBEDTLS_FOUND)
+    # mbedTLS 3.x ships no pkg-config in some distros; fall back to finding the
+    # three libraries it splits into.
+    find_library(MBEDTLS_LIB mbedtls)
+    find_library(MBEDX509_LIB mbedx509)
+    find_library(MBEDCRYPTO_LIB mbedcrypto)
+    find_path(MBEDTLS_INC mbedtls/ssl.h)
+    if(MBEDTLS_LIB AND MBEDX509_LIB AND MBEDCRYPTO_LIB AND MBEDTLS_INC)
+      set(MBEDTLS_FOUND TRUE)
+      set(MBEDTLS_INCLUDE_DIRS ${MBEDTLS_INC})
+      set(MBEDTLS_LIBRARIES ${MBEDTLS_LIB} ${MBEDX509_LIB} ${MBEDCRYPTO_LIB})
+    endif()
+  endif()
 else()
   # Homebrew ships SDL2 with pkg-config but not always a CMake config package, and
   # vcpkg ships the config but no pkg-config. Try the config first and fall back,
@@ -103,6 +120,27 @@ else()
     endif()
   elseif(PkgConfig_FOUND)
     pkg_check_modules(SDL2_NET sdl2_net)
+  endif()
+
+  # mbedTLS, same two-way discovery. vcpkg ships a CMake config; Homebrew ships
+  # pkg-config.
+  find_package(MbedTLS CONFIG QUIET)
+  if(MbedTLS_FOUND)
+    set(MBEDTLS_FOUND TRUE)
+    set(MBEDTLS_LIBRARIES MbedTLS::mbedtls MbedTLS::mbedx509 MbedTLS::mbedcrypto)
+  elseif(PkgConfig_FOUND)
+    pkg_check_modules(MBEDTLS mbedtls)
+    if(NOT MBEDTLS_FOUND)
+      find_library(MBEDTLS_LIB mbedtls)
+      find_library(MBEDX509_LIB mbedx509)
+      find_library(MBEDCRYPTO_LIB mbedcrypto)
+      find_path(MBEDTLS_INC mbedtls/ssl.h)
+      if(MBEDTLS_LIB AND MBEDX509_LIB AND MBEDCRYPTO_LIB AND MBEDTLS_INC)
+        set(MBEDTLS_FOUND TRUE)
+        set(MBEDTLS_INCLUDE_DIRS ${MBEDTLS_INC})
+        set(MBEDTLS_LIBRARIES ${MBEDTLS_LIB} ${MBEDX509_LIB} ${MBEDCRYPTO_LIB})
+      endif()
+    endif()
   endif()
 endif()
 
@@ -251,6 +289,7 @@ add_executable(jsglq
   src/bind_worker.c
   src/bind_gamepad.c
   src/bind_websocket.c
+  src/net_tls.c
   src/bundle.c
   src/sprite2d.c
   src/bind_gl.cpp
@@ -273,6 +312,19 @@ target_link_libraries(jsglq PRIVATE
   $<$<BOOL:${HAVE_WEBAUDIO}>:webaudio>
   ${SDL2_LIBRARIES} ${EGL_LIBRARIES} ${GLES_LIBRARIES}
 )
+if(MBEDTLS_FOUND)
+  target_compile_definitions(jsglq PRIVATE JSGLQ_HAVE_TLS=1)
+  target_include_directories(jsglq PRIVATE ${MBEDTLS_INCLUDE_DIRS})
+  target_link_libraries(jsglq PRIVATE ${MBEDTLS_LIBRARIES})
+  target_link_directories(jsglq PRIVATE ${MBEDTLS_LIBRARY_DIRS})
+else()
+  message(WARNING
+    "mbedTLS not found; https:// and wss:// will be unavailable.\n"
+    "  Linux:   apt install libmbedtls-dev\n"
+    "  macOS:   brew install mbedtls\n"
+    "  Windows: vcpkg install mbedtls")
+endif()
+
 if(SDL2_NET_FOUND)
   target_compile_definitions(jsglq PRIVATE JSGLQ_HAVE_WEBSOCKET=1)
   target_include_directories(jsglq PRIVATE ${SDL2_NET_INCLUDE_DIRS})
