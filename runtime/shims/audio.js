@@ -402,7 +402,68 @@ export function installAudio(g) {
 
   class AudioContext extends BaseAudioContext {}
 
+  /*
+   * OfflineAudioContext.
+   *
+   * Renders through the same graph as the live context rather than a second
+   * engine instance — the C layer holds one graph, so an offline context shares
+   * it and renders on demand. That means nodes created on an offline context are
+   * the SAME nodes the live context would use, which is what makes
+   * startRendering() produce real audio rather than silence.
+   *
+   * The limitation this carries: an offline render is not isolated from the live
+   * graph. A game that builds an offline context while sound is playing renders
+   * both. Games use this to pre-render one effect at load time, where that does
+   * not arise, and the alternative (a second engine graph) is a much larger
+   * change than the feature warrants.
+   */
+  class OfflineAudioContext extends BaseAudioContext {
+    constructor(channelsOrOptions, length, sampleRate) {
+      super();
+      if (typeof channelsOrOptions === 'object' && channelsOrOptions !== null) {
+        this.numberOfChannels = channelsOrOptions.numberOfChannels ?? 1;
+        this.length = channelsOrOptions.length ?? 0;
+        this.sampleRate = channelsOrOptions.sampleRate ?? 44100;
+      } else {
+        this.numberOfChannels = channelsOrOptions ?? 1;
+        this.length = length ?? 0;
+        this.sampleRate = sampleRate ?? 44100;
+      }
+      this.state = 'suspended';
+      this.oncomplete = null;
+    }
+
+    async startRendering() {
+      if (!host.renderOffline) {
+        throw new Error('OfflineAudioContext.startRendering is not available ' +
+                        'in this build');
+      }
+      const interleaved = host.renderOffline(this.sampleRate,
+                                             this.numberOfChannels, this.length);
+      this.state = 'closed';
+
+      // Deinterleave into an AudioBuffer, which is what the spec returns.
+      const buf = new AudioBuffer({
+        numberOfChannels: this.numberOfChannels,
+        length: this.length,
+        sampleRate: this.sampleRate,
+        data: interleaved,
+      });
+      if (this.oncomplete) {
+        try { this.oncomplete({ renderedBuffer: buf }); } catch (_) {}
+      }
+      return buf;
+    }
+
+    // Present so a game's suspend/resume bookkeeping does not throw; an offline
+    // context has no device to pause.
+    async suspend() {}
+    async resume() {}
+  }
+
   g.AudioContext = AudioContext;
+  g.OfflineAudioContext = OfflineAudioContext;
+  g.webkitOfflineAudioContext = OfflineAudioContext;
   g.webkitAudioContext = AudioContext;
   g.BaseAudioContext = BaseAudioContext;
   g.AudioNode = AudioNode;
@@ -416,6 +477,17 @@ export function installAudio(g) {
   g.DelayNode = DelayNode;
   g.AnalyserNode = AnalyserNode;
   g.AudioDestinationNode = AudioDestinationNode;
+  // The remaining node types. Libraries construct these directly
+  // (`new ConvolverNode(ctx)`) and feature-detect them by name, so exposing only
+  // the ctx.createX() factories leaves both of those paths broken.
+  g.WaveShaperNode = WaveShaperNode;
+  g.ConvolverNode = ConvolverNode;
+  g.DynamicsCompressorNode = DynamicsCompressorNode;
+  g.PannerNode = PannerNode;
+  g.ConstantSourceNode = ConstantSourceNode;
+  g.ChannelSplitterNode = ChannelSplitterNode;
+  g.ChannelMergerNode = ChannelMergerNode;
+  g.IIRFilterNode = IIRFilterNode;
 
   /*
    * HTMLAudioElement.

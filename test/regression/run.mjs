@@ -464,6 +464,31 @@ check('audio: every node type the engine implements is reachable and real',
     return { ok: /R:ALL/.test(o), detail: (/R:(\S+)/.exec(o) || [])[1] };
   });
 
+check('audio: OfflineAudioContext renders real samples',
+  `try {
+   const oac=new OfflineAudioContext(2,4096,44100);
+   const osc=oac.createOscillator(); osc.frequency.value=440;
+   osc.connect(oac.destination); osc.start(0);
+   oac.startRendering().then(buf=>{
+     const d=buf.getChannelData(0);
+     let s=0; for(const v of d) s+=v*v;
+     console.log('R:'+buf.length+','+buf.numberOfChannels+','+Math.sqrt(s/d.length).toFixed(3));
+   }).catch(e=>console.log('R:ERR:'+e.message));
+   } catch (e) {
+     console.log('R:NO-DEVICE:' + e.message.slice(0,60));
+   }`,
+  (o) => {
+    if (/R:NO-DEVICE/.test(o)) {
+      return { ok: /could not open audio device|audio init failed/i.test(o),
+               detail: 'no audio device (CI); declined cleanly' };
+    }
+    const m = /R:(\d+),(\d+),([\d.]+)/.exec(o);
+    if (!m) return { ok: false, detail: (/R:(.*)/.exec(o) || [])[1] || 'no output' };
+    const [, len, ch, rms] = m;
+    return { ok: len === '4096' && ch === '2' && Math.abs(Number(rms) - 0.707) < 0.05,
+             detail: `${len} frames, ${ch}ch, rms ${rms}` };
+  });
+
 /* ----------------------------------------------------------------- gamepads -- */
 
 /* The Gamepad API shipped as a stub returning four nulls while the README claimed
