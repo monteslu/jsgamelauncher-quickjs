@@ -200,6 +200,25 @@ void jsglq_temp_dir(char *out, size_t out_size)
 #endif
 }
 
+bool jsglq_join_path(char *out, size_t out_size, const char *dir, const char *leaf)
+{
+    if (!out || out_size == 0) return false;
+    out[0] = 0;
+    if (!dir || !leaf) return false;
+
+    size_t dlen = strlen(dir);
+    /* Do not double the separator when the directory already ends in one. */
+    int need_sep = (dlen > 0 && dir[dlen - 1] != '/' && dir[dlen - 1] != JSGLQ_PATH_SEP);
+    size_t total = dlen + (size_t)(need_sep ? 1 : 0) + strlen(leaf);
+    if (total + 1 > out_size) return false;
+
+    memcpy(out, dir, dlen);
+    size_t at = dlen;
+    if (need_sep) out[at++] = '/';
+    strcpy(out + at, leaf);
+    return true;
+}
+
 void jsglq_setenv(const char *name, const char *value)
 {
 #ifdef _WIN32

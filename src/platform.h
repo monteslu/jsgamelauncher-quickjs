@@ -51,6 +51,14 @@ bool jsglq_is_dir(const char *path);
 /* The OS temp directory, without a trailing separator. */
 void jsglq_temp_dir(char *out, size_t out_size);
 
+/* Join two path components into `out`.
+ *
+ * Returns false if the result would not fit, WITHOUT writing a truncated path.
+ * That distinction matters: snprintf truncates silently, and a truncated path
+ * is a lookup against the wrong file rather than an error — so a caller that
+ * ignores the return value gets a clean failure instead of a mystery. */
+bool jsglq_join_path(char *out, size_t out_size, const char *dir, const char *leaf);
+
 /* Set an environment variable for this process (used to pass the fused runtime
    directory to the module loader). */
 void jsglq_setenv(const char *name, const char *value);
